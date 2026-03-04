@@ -1,0 +1,100 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "QualiVision",
+  "projectDescription": "A comprehensive framework for video quality assessment of AI-generated content using DOVER++ and V-JEPA2 models.",
+  "theme": "aspen",
+  "primaryColor": "#6366F1",
+  "lightColor": "#818CF8",
+  "darkColor": "#4F46E5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/dover-model",
+              "concepts/vjepa-model",
+              "concepts/quality-dimensions",
+              "concepts/data-preprocessing"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/training",
+              "guides/evaluation",
+              "guides/custom-datasets",
+              "guides/memory-optimization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Models",
+            "pages": [
+              "api/models/dover",
+              "api/models/vjepa"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utils/dataset",
+              "api/utils/training",
+              "api/utils/metrics",
+              "api/utils/memory"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "DOVER++ model with quality-aware fusion and cross-modal attention",
+    "V-JEPA2 model with strategic layer freezing and discriminative learning",
+    "Multi-dimensional quality assessment (Temporal, Fidelity, Aesthetic, Alignment)",
+    "Hybrid loss function combining smooth L1, ranking, and scale-aware losses",
+    "Pre-trained models for immediate evaluation",
+    "Memory-efficient training with gradient accumulation",
+    "Support for custom datasets and fine-tuning"
+  ],
+  "publicApiSurface": [
+    "DOVERModel",
+    "VJEPAModel",
+    "DOVERModelSimple",
+    "QualityAwareFusion",
+    "OptimizedMOSHead",
+    "create_data_loaders",
+    "create_test_loader",
+    "HybridLossFunction",
+    "train_epoch",
+    "evaluate",
+    "compute_metrics",
+    "compute_vquala_score",
+    "ultra_memory_cleanup",
+    "DOVER_CONFIG",
+    "VJEPA_CONFIG",
+    "TRAINING_CONFIG",
+    "LOSS_CONFIG"
+  ]
+}
