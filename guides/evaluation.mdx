@@ -1,0 +1,410 @@
+---
+title: 'Evaluating Models'
+description: 'Evaluate trained models and interpret quality assessment results'
+icon: 'chart-line'
+---
+
+## Overview
+
+The evaluation script provides comprehensive model assessment capabilities with support for multiple output formats and detailed metrics reporting.
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare Test Data">
+    Organize your test data:
+    ```bash
+    data/test/
+    ├── test_labels.csv
+    └── videos/
+        ├── test_video001.mp4
+        └── ...
+    ```
+  </Step>
+
+  <Step title="Run Evaluation">
+    ```bash
+    python scripts/evaluate.py \
+        --model dover \
+        --checkpoint models/dover_best.pt \
+        --data data/test
+    ```
+  </Step>
+
+  <Step title="Review Results">
+    Results are saved in the `results/` directory with multiple formats.
+  </Step>
+</Steps>
+
+## Evaluation Commands
+
+### DOVER++ Model
+
+<CodeGroup>
+```bash Basic Evaluation
+python scripts/evaluate.py \
+    --model dover \
+    --checkpoint models/dover_best.pt \
+    --data data/test
+```
+
+```bash Custom Output Directory
+python scripts/evaluate.py \
+    --model dover \
+    --checkpoint models/dover_best.pt \
+    --data data/test \
+    --output results/dover
+```
+
+```bash Custom Batch Size
+python scripts/evaluate.py \
+    --model dover \
+    --checkpoint models/dover_best.pt \
+    --data data/test \
+    --batch-size 4
+```
+</CodeGroup>
+
+### V-JEPA2 Model
+
+<CodeGroup>
+```bash Basic Evaluation
+python scripts/evaluate.py \
+    --model vjepa \
+    --checkpoint models/vjepa_best.pt \
+    --data data/test
+```
+
+```bash CPU Evaluation
+python scripts/evaluate.py \
+    --model vjepa \
+    --checkpoint models/vjepa_best.pt \
+    --data data/test \
+    --device cpu
+```
+</CodeGroup>
+
+## Command-Line Arguments
+
+| Argument | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `--model` | Model type: `dover` or `vjepa` | - | Yes |
+| `--checkpoint` | Path to model checkpoint | - | Yes |
+| `--data` | Path to test data directory | - | Yes |
+| `--output` | Output directory for results | `results` | No |
+| `--batch-size` | Batch size for evaluation | 1 | No |
+| `--device` | Device to use: `cuda` or `cpu` | `cuda` | No |
+| `--csv-name` | Name of test CSV file | `test_labels.csv` | No |
+| `--video-dir` | Name of video directory | `videos` | No |
+
+<Tip>
+Batch size of 1 is recommended for evaluation to ensure consistent memory usage.
+</Tip>
+
+## Evaluation Metrics
+
+The evaluation computes three key metrics (src/utils/metrics.py:33):
+
+### SROCC (Spearman Rank Order Correlation Coefficient)
+
+Measures the **monotonic relationship** between predicted and ground truth scores. Values range from -1 to 1, where:
+- 1.0 = Perfect positive correlation
+- 0.0 = No correlation
+- -1.0 = Perfect negative correlation
+
+**Best for:** Ranking quality
+
+### PLCC (Pearson Linear Correlation Coefficient)
+
+Measures the **linear relationship** between predicted and ground truth scores. Values range from -1 to 1.
+
+**Best for:** Absolute score accuracy
+
+### VQualA Score
+
+The official challenge metric:
+
+```python
+VQualA_Score = (SROCC + PLCC) / 2
+```
+
+This is the primary metric used for model comparison (scripts/evaluate.py:264).
+
+<Warning>
+Higher values are better for all metrics. A VQualA score above 0.80 indicates strong performance.
+</Warning>
+
+## Output Formats
+
+Evaluation generates multiple output files (scripts/evaluate.py:270):
+
+### 1. Predictions CSV
+
+**File:** `predictions_{MODEL}_{TIMESTAMP}.csv`
+
+```csv
+video_name,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+test_video001.mp4,3.24,4.15,3.82,3.51,3.68
+test_video002.mp4,4.52,4.18,4.76,4.13,4.40
+```
+
+Contains predicted MOS scores for all five quality dimensions:
+- Traditional MOS (image fidelity)
+- Alignment MOS (text-video alignment)
+- Aesthetic MOS (visual appeal)
+- Temporal MOS (temporal consistency)
+- Overall MOS (aggregate quality)
+
+### 2. Predictions Excel
+
+**File:** `predictions_{MODEL}_{TIMESTAMP}.xlsx`
+
+Same data as CSV but in Excel format for easy viewing and analysis.
+
+### 3. Results JSON
+
+**File:** `results_{MODEL}_{TIMESTAMP}.json`
+
+```json
+{
+  "model_type": "dover",
+  "checkpoint_path": "models/dover_best.pt",
+  "timestamp": "20250304_143022",
+  "num_samples": 500,
+  "config": {
+    "video_resolution": [640, 640],
+    "num_frames": 64,
+    "batch_size": 4
+  },
+  "metrics": {
+    "srocc": 0.8234,
+    "plcc": 0.8156,
+    "vquala_score": 0.8195
+  },
+  "prediction_stats": {
+    "min": 1.23,
+    "max": 4.89,
+    "mean": 3.45,
+    "std": 0.87
+  }
+}
+```
+
+### 4. Summary Report
+
+**File:** `report_{MODEL}_{TIMESTAMP}.txt`
+
+Human-readable text report:
+
+```
+QualiVision Model Evaluation Report
+===================================
+
+Model: DOVER
+Checkpoint: models/dover_best.pt
+Timestamp: 20250304_143022
+Samples: 500
+
+Model Configuration:
+-------------------
+  video_resolution: (640, 640)
+  num_frames: 64
+  batch_size: 4
+  learning_rate: 0.0001
+
+Evaluation Metrics:
+------------------
+  srocc: 0.8234
+  plcc: 0.8156
+  vquala_score: 0.8195
+
+Prediction Statistics:
+---------------------
+  Min: 1.23
+  Max: 4.89
+  Mean: 3.45
+  Std: 0.87
+```
+
+## Interpreting Results
+
+### Score Distributions
+
+Check the prediction statistics in the JSON output:
+
+**Healthy Distribution:**
+- Mean: 3.0-4.0 (centered around mid-range)
+- Std: 0.5-1.0 (reasonable spread)
+- Range: 1.0-5.0 (using full scale)
+
+**Warning Signs:**
+- Mean < 2.0 or > 4.5: Model may be biased
+- Std < 0.3: Model may be under-confident
+- Std > 1.5: Model may be over-confident
+
+### Metric Interpretation
+
+| VQualA Score | Interpretation |
+|--------------|----------------|
+| > 0.90 | Excellent correlation |
+| 0.80-0.90 | Strong correlation |
+| 0.70-0.80 | Good correlation |
+| 0.60-0.70 | Moderate correlation |
+| < 0.60 | Poor correlation |
+
+### SROCC vs PLCC
+
+**SROCC > PLCC:** Model is good at ranking but may have scale issues
+- **Solution:** Recalibrate output scaling
+
+**PLCC > SROCC:** Model predicts absolute values well but ranking is off
+- **Solution:** Increase ranking loss weight in training
+
+## Console Output
+
+During evaluation (scripts/evaluate.py:188):
+
+```
+QualiVision Model Evaluation
+============================
+Model: DOVER
+Checkpoint: models/dover_best.pt
+Test CSV: data/test/test_labels.csv
+Test videos: data/test/videos
+Output: results/
+Device: cuda
+
+Initializing DOVER Model Evaluator
+Checkpoint: models/dover_best.pt
+Device: cuda
+✓ Model loaded successfully
+GPU Memory - Allocated: 8.2GB, Free: 15.8GB, Max Used: 8.2GB
+
+Evaluating on test dataset:
+  CSV: data/test/test_labels.csv
+  Videos: data/test/videos
+  Batch size: 1
+
+Generating predictions...
+Predicting: 100%|███████████| 500/500 [15:23<00:00,  1.85s/it]
+✓ Generated predictions for 500 samples
+✓ Ground truth labels found, computing metrics
+
+Evaluation Results:
+------------------
+  SROCC: 0.8234
+  PLCC: 0.8156
+  VQualA Score: 0.8195
+
+✓ Predictions saved:
+  CSV: results/predictions_DOVER_20250304_143022.csv
+  Excel: results/predictions_DOVER_20250304_143022.xlsx
+✓ Results saved: results/results_DOVER_20250304_143022.json
+✓ Summary report saved: results/report_DOVER_20250304_143022.txt
+
+✓ Evaluation completed successfully!
+Final VQualA Score: 0.8195
+```
+
+## Evaluation Without Ground Truth
+
+If your test CSV doesn't contain MOS labels (scripts/evaluate.py:173):
+
+```bash
+python scripts/evaluate.py \
+    --model dover \
+    --checkpoint models/dover_best.pt \
+    --data data/unlabeled_test
+```
+
+Output:
+```
+⚠ No ground truth labels found, skipping metrics computation
+✓ Predictions saved (metrics not computed)
+```
+
+The predictions CSV/Excel will still be generated for submission.
+
+## Memory Management
+
+The evaluator includes automatic memory cleanup (scripts/evaluate.py:214):
+
+```python
+# Memory cleanup every 10 batches
+if i % 10 == 0:
+    ultra_memory_cleanup()
+```
+
+**OOM Handling:** Failed batches receive dummy predictions and a warning:
+
+```
+⚠ Error processing batch 42: CUDA out of memory
+```
+
+<Tip>
+Reduce `--batch-size` to 1 if experiencing memory issues during evaluation.
+</Tip>
+
+## Comparing Models
+
+Evaluate multiple models and compare VQualA scores:
+
+```bash
+# Evaluate DOVER++
+python scripts/evaluate.py --model dover --checkpoint models/dover_best.pt --data data/test
+
+# Evaluate V-JEPA2
+python scripts/evaluate.py --model vjepa --checkpoint models/vjepa_best.pt --data data/test
+```
+
+Compare the VQualA scores in the output:
+
+```
+DOVER++ VQualA Score: 0.8195
+V-JEPA2 VQualA Score: 0.8347
+```
+
+## Benchmark Results
+
+Expected performance on VQualA 2025 Challenge:
+
+| Model | SROCC | PLCC | VQualA Score | Memory | Inference Time |
+|-------|-------|------|--------------|--------|----------------|
+| DOVER++ | TBA | TBA | TBA | ~12GB | ~1.8s/video |
+| V-JEPA2 | TBA | TBA | TBA | ~16GB | ~2.5s/video |
+
+## Troubleshooting
+
+### Checkpoint Not Found
+
+```
+Error: Checkpoint not found: models/dover_best.pt
+```
+
+**Solution:** Verify checkpoint path or train a model first.
+
+### CUDA Out of Memory
+
+```
+⚠ OOM during validation, skipping batch...
+```
+
+**Solution:** Use `--batch-size 1` or `--device cpu`.
+
+### Low Correlation Scores
+
+**Possible causes:**
+1. Model undertrained (train longer)
+2. Data distribution mismatch (check test set)
+3. Wrong checkpoint loaded (verify path)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Datasets" icon="database" href="/guides/custom-datasets">
+    Adapt QualiVision for your data
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/models/dover">
+    Explore the model APIs
+  </Card>
+</CardGroup>

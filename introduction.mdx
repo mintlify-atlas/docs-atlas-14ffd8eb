@@ -1,0 +1,188 @@
+---
+title: 'QualiVision - AI Video Quality Assessment'
+description: 'A comprehensive framework for evaluating AI-generated video quality across multiple dimensions using state-of-the-art multi-modal models'
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="QualiVision Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="QualiVision Hero Dark"
+/>
+
+## Welcome to QualiVision
+
+QualiVision is a state-of-the-art framework for **video quality assessment** specifically designed for AI-generated content. Built for the **VQualA 2025 Challenge**, it provides comprehensive quality evaluation across four critical dimensions.
+
+<CardGroup cols={3}>
+  <Card
+    title="Quick Start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get started with QualiVision in minutes using pre-trained models
+  </Card>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Set up your environment and install dependencies
+  </Card>
+  <Card
+    title="Models Overview"
+    icon="brain"
+    href="/concepts/architecture"
+  >
+    Learn about DOVER++ and V-JEPA2 architectures
+  </Card>
+</CardGroup>
+
+## Quality Assessment Dimensions
+
+QualiVision evaluates AI-generated videos across four critical quality dimensions:
+
+<AccordionGroup>
+  <Accordion title="Temporal Consistency" icon="clock">
+    Measures the coherence and smoothness of motion across video frames. Ensures that objects and scenes maintain logical continuity throughout the video sequence.
+  </Accordion>
+  
+  <Accordion title="Image Fidelity" icon="image">
+    Evaluates visual quality including sharpness, clarity, and absence of artifacts. Assesses the technical quality of individual frames and overall video rendering.
+  </Accordion>
+  
+  <Accordion title="Aesthetic Appeal" icon="palette">
+    Analyzes artistic and visual attractiveness including composition, color harmony, and overall visual appeal. Goes beyond technical quality to evaluate subjective beauty.
+  </Accordion>
+  
+  <Accordion title="Text-Video Alignment" icon="align-center">
+    Determines how well the video content corresponds to the input text prompt. Critical for ensuring AI-generated videos match user intentions.
+  </Accordion>
+</AccordionGroup>
+
+## Two Powerful Models
+
+QualiVision provides two complementary state-of-the-art architectures:
+
+<CardGroup cols={2}>
+  <Card title="DOVER++" icon="video">
+    **ConvNeXt 3D-based Architecture**
+    
+    - Cross-modal attention between video and text
+    - Quality-aware fusion mechanism
+    - 640×640 resolution, 64 frames
+    - ~120M parameters, ~12GB memory
+    - Robust aesthetic/technical quality separation
+  </Card>
+  
+  <Card title="V-JEPA2" icon="eye">
+    **Vision-JEPA2 ViT-Giant Architecture**
+    
+    - Strategic layer freezing (85% frozen)
+    - Discriminative learning rates
+    - 384×384 resolution, 64 frames
+    - ~1.1B parameters, ~16GB memory
+    - Strong video representation learning
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-Modal Fusion" icon="layer-group">
+    Advanced cross-modal attention mechanisms that combine video features with text prompt embeddings using BGE-Large encoder
+  </Card>
+  
+  <Card title="Hybrid Loss Function" icon="function">
+    Sophisticated loss combining smooth L1, ranking loss, and scale-aware components for robust training
+  </Card>
+  
+  <Card title="Pre-trained Models" icon="download">
+    Ready-to-use checkpoints trained on VQualA 2025 Challenge dataset for immediate evaluation
+  </Card>
+  
+  <Card title="Efficient Training" icon="gauge">
+    Strategic model freezing and memory optimization techniques enable training on consumer GPUs
+  </Card>
+</CardGroup>
+
+## Real-World Application
+
+<Note>
+  **VQualA 2025 Challenge**
+  
+  QualiVision is our submission for the VQualA 2025 Challenge at ICCV 2025 Workshops. The framework is designed to handle the **TaobaoVD-GC dataset** containing thousands of AI-generated videos with comprehensive quality annotations.
+</Note>
+
+### Data Format
+
+QualiVision works with structured video datasets:
+
+```csv
+video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+video002.mp4,"Sunset over mountains",4.5,4.2,4.8,4.1,4.4
+```
+
+Each video is evaluated across multiple Mean Opinion Score (MOS) dimensions on a 1-5 scale.
+
+## Technical Innovations
+
+<Steps>
+  <Step title="Quality-Aware Fusion">
+    Dynamic attention weighting that adapts based on text content, allowing the model to focus on relevant quality aspects for different types of videos.
+  </Step>
+  
+  <Step title="Strategic Layer Freezing">
+    Freeze 85% of V-JEPA2 layers to maintain pre-trained knowledge while enabling efficient fine-tuning on domain-specific data.
+  </Step>
+  
+  <Step title="Adaptive Loss Weighting">
+    Dynamically adjusts loss component weights during training to balance different quality objectives.
+  </Step>
+  
+  <Step title="Memory Optimization">
+    Advanced techniques including gradient checkpointing and efficient frame sampling enable training large models on limited hardware.
+  </Step>
+</Steps>
+
+## Performance Metrics
+
+Our models are evaluated using industry-standard video quality metrics:
+
+- **SROCC**: Spearman Rank Order Correlation Coefficient
+- **PLCC**: Pearson Linear Correlation Coefficient  
+- **VQualA Score**: Custom challenge metric combining multiple quality dimensions
+
+| Model    | Parameters | Memory  | Resolution |
+|----------|------------|---------|------------|
+| DOVER++  | ~120M      | ~12GB   | 640×640    |
+| V-JEPA2  | ~1.1B      | ~16GB   | 384×384    |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Try the Quickstart"
+    icon="play"
+    href="/quickstart"
+  >
+    Run your first evaluation in under 5 minutes
+  </Card>
+  
+  <Card
+    title="Install QualiVision"
+    icon="download"
+    href="/installation"
+  >
+    Set up your development environment
+  </Card>
+</CardGroup>
+
+<Warning>
+  QualiVision requires Python 3.8+ and is optimized for CUDA-enabled GPUs. CPU evaluation is supported but significantly slower.
+</Warning>

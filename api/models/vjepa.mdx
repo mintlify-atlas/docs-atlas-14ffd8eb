@@ -1,0 +1,426 @@
+---
+title: "V-JEPA2"
+description: "V-JEPA2 (Video Joint Embedding Predictive Architecture) model implementation with discriminative learning and strategic layer freezing"
+---
+
+## Overview
+
+V-JEPA2 is a state-of-the-art video encoder based on Vision Transformers (ViT-Giant) with strategic layer freezing for efficient fine-tuning. The implementation includes discriminative learning rates, optimized MOS prediction, and BGE-Large text encoding.
+
+## VJEPAModel
+
+The main V-JEPA2 model class with strategic layer freezing and discriminative learning.
+
+### Constructor
+
+```python
+VJEPAModel(
+    vjepa_model_id: str = "facebook/vjepa2-vitg-fpc64-384-ssv2",
+    text_model_id: str = "BAAI/bge-large-en-v1.5",
+    freeze_ratio: float = 0.85,
+    device: str = 'cuda'
+)
+```
+
+<ParamField path="vjepa_model_id" type="str" default="facebook/vjepa2-vitg-fpc64-384-ssv2">
+  HuggingFace model ID for the V-JEPA2 video encoder. Uses ViT-Giant with 64 frames per clip at 384 resolution.
+</ParamField>
+
+<ParamField path="text_model_id" type="str" default="BAAI/bge-large-en-v1.5">
+  HuggingFace model ID for the text encoder. Uses BGE-Large for high-quality text embeddings.
+</ParamField>
+
+<ParamField path="freeze_ratio" type="float" default="0.85">
+  Ratio of transformer layers to freeze (0.85 = freeze bottom 85%). Reduces memory usage and improves training stability.
+</ParamField>
+
+<ParamField path="device" type="str" default="cuda">
+  Device to place the model on ('cuda' or 'cpu').
+</ParamField>
+
+### Methods
+
+#### forward
+
+Forward pass through the V-JEPA2 model with video and text inputs.
+
+```python
+forward(
+    pixel_values_videos: torch.Tensor,
+    text_emb: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="pixel_values_videos" type="torch.Tensor" required>
+  Video tensor with shape (B, C, T, H, W) where:
+  - B = batch size
+  - C = channels (3 for RGB)
+  - T = number of frames (typically 64)
+  - H = height (384)
+  - W = width (384)
+</ParamField>
+
+<ParamField path="text_emb" type="torch.Tensor" required>
+  Pre-computed text embeddings with shape (B, text_dim).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  MOS predictions with shape (B, 5) containing [Traditional, Alignment, Aesthetic, Temporal, Overall] quality scores.
+</ResponseField>
+
+#### encode_text
+
+Encode text prompts using the BGE-Large text encoder.
+
+```python
+encode_text(
+    prompts: List[str]
+) -> torch.Tensor
+```
+
+<ParamField path="prompts" type="List[str]" required>
+  List of text prompts to encode.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Text embeddings with shape (B, text_dim). Embeddings are normalized.
+</ResponseField>
+
+#### encode_video
+
+Encode video using the V-JEPA2 ViT-Giant encoder.
+
+```python
+encode_video(
+    pixel_values_videos: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="pixel_values_videos" type="torch.Tensor" required>
+  Video tensor with shape (B, C, T, H, W).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Video features (CLS token) with shape (B, hidden_size).
+</ResponseField>
+
+#### extract_features
+
+Extract both video and text features without MOS prediction.
+
+```python
+extract_features(
+    pixel_values_videos: torch.Tensor,
+    prompts: List[str]
+) -> Dict[str, torch.Tensor]
+```
+
+<ParamField path="pixel_values_videos" type="torch.Tensor" required>
+  Video tensor with shape (B, C, T, H, W).
+</ParamField>
+
+<ParamField path="prompts" type="List[str]" required>
+  List of text prompts corresponding to each video.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, torch.Tensor]">
+  Dictionary containing:
+  - `video_features`: Video embeddings (B, hidden_size)
+  - `text_features`: Text embeddings (B, text_dim)
+</ResponseField>
+
+#### get_discriminative_params
+
+Get parameter groups for discriminative learning rates.
+
+```python
+get_discriminative_params() -> List[Dict[str, Any]]
+```
+
+<ResponseField name="return" type="List[Dict[str, Any]]">
+  List of parameter groups:
+  - `text_encoder`: Text encoder parameters (lowest LR)
+  - `video_encoder`: Video encoder parameters (medium LR)
+  - `prediction_head`: MOS prediction head parameters (highest LR)
+</ResponseField>
+
+#### freeze_video_encoder
+
+Freeze the entire video encoder.
+
+```python
+freeze_video_encoder() -> None
+```
+
+#### unfreeze_video_encoder
+
+Unfreeze the video encoder while respecting strategic freezing.
+
+```python
+unfreeze_video_encoder() -> None
+```
+
+#### freeze_text_encoder
+
+Freeze the text encoder.
+
+```python
+freeze_text_encoder() -> None
+```
+
+#### unfreeze_text_encoder
+
+Unfreeze the text encoder.
+
+```python
+unfreeze_text_encoder() -> None
+```
+
+### Usage Example
+
+```python
+import torch
+from src.models.vjepa_model import VJEPAModel
+
+# Initialize model with 85% layer freezing
+model = VJEPAModel(
+    vjepa_model_id="facebook/vjepa2-vitg-fpc64-384-ssv2",
+    text_model_id="BAAI/bge-large-en-v1.5",
+    freeze_ratio=0.85,
+    device='cuda'
+)
+model.eval()
+
+# Prepare inputs
+video = torch.randn(2, 3, 64, 384, 384).cuda()
+prompts = [
+    "A person dancing in a studio",
+    "Birds flying in the sky"
+]
+
+# Encode text
+text_emb = model.encode_text(prompts)
+
+# Get MOS predictions
+with torch.no_grad():
+    mos_scores = model(video, text_emb)
+    print(f"MOS scores: {mos_scores}")  # Shape: (2, 5)
+
+# Extract features separately
+features = model.extract_features(video, prompts)
+print(f"Video features: {features['video_features'].shape}")
+print(f"Text features: {features['text_features'].shape}")
+
+# Get discriminative parameter groups for optimizer
+param_groups = model.get_discriminative_params()
+for group in param_groups:
+    print(f"{group['name']}: {len(list(group['params']))} params")
+```
+
+### Training with Discriminative Learning Rates
+
+```python
+import torch.optim as optim
+from src.models.vjepa_model import VJEPAModel
+
+# Initialize model
+model = VJEPAModel(freeze_ratio=0.85, device='cuda')
+
+# Get parameter groups
+param_groups = model.get_discriminative_params()
+
+# Set different learning rates for each group
+optimizer = optim.AdamW([
+    {'params': param_groups[0]['params'], 'lr': 1e-5},  # text_encoder
+    {'params': param_groups[1]['params'], 'lr': 5e-5},  # video_encoder
+    {'params': param_groups[2]['params'], 'lr': 1e-4},  # prediction_head
+], weight_decay=0.01)
+
+print("Optimizer configured with discriminative learning rates")
+```
+
+---
+
+## OptimizedMOSHead
+
+Optimized MOS prediction head that combines video and text features.
+
+### Constructor
+
+```python
+OptimizedMOSHead(
+    dv: int,
+    dt: int,
+    h: int = 512
+)
+```
+
+<ParamField path="dv" type="int" required>
+  Video feature dimension (hidden_size from V-JEPA2).
+</ParamField>
+
+<ParamField path="dt" type="int" required>
+  Text feature dimension (embedding dimension from text encoder).
+</ParamField>
+
+<ParamField path="h" type="int" default="512">
+  Hidden dimension for MLP layers.
+</ParamField>
+
+### Methods
+
+#### forward
+
+Combine video and text features to predict MOS scores.
+
+```python
+forward(
+    v: torch.Tensor,
+    t: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="v" type="torch.Tensor" required>
+  Video features with shape (B, dv).
+</ParamField>
+
+<ParamField path="t" type="torch.Tensor" required>
+  Text features with shape (B, dt).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  MOS predictions with shape (B, 5) containing [Traditional, Alignment, Aesthetic, Temporal, Overall] scores.
+</ResponseField>
+
+### Usage Example
+
+```python
+import torch
+from src.models.vjepa_model import OptimizedMOSHead
+
+# Initialize MOS head
+mos_head = OptimizedMOSHead(
+    dv=1408,  # V-JEPA2 ViT-Giant hidden size
+    dt=1024,  # BGE-Large embedding size
+    h=512
+).cuda()
+
+# Create sample features
+video_features = torch.randn(4, 1408).cuda()
+text_features = torch.randn(4, 1024).cuda()
+
+# Predict MOS scores
+mos_scores = mos_head(video_features, text_features)
+print(f"MOS scores: {mos_scores}")  # Shape: (4, 5)
+```
+
+---
+
+## Helper Functions
+
+### create_vjepa_model
+
+Factory function to create V-JEPA2 model from configuration dictionary.
+
+```python
+create_vjepa_model(
+    config: Dict[str, Any]
+) -> VJEPAModel
+```
+
+<ParamField path="config" type="Dict[str, Any]" required>
+  Configuration dictionary with keys:
+  - `video_encoder`: V-JEPA2 model ID (default: "facebook/vjepa2-vitg-fpc64-384-ssv2")
+  - `text_encoder`: Text encoder model ID (default: "BAAI/bge-large-en-v1.5")
+  - `freeze_ratio`: Layer freeze ratio (default: 0.85)
+  - `device`: Device to use (default: "cuda")
+</ParamField>
+
+<ResponseField name="return" type="VJEPAModel">
+  Initialized V-JEPA2 model.
+</ResponseField>
+
+### Usage Example
+
+```python
+from src.models.vjepa_model import create_vjepa_model
+
+config = {
+    'video_encoder': 'facebook/vjepa2-vitg-fpc64-384-ssv2',
+    'text_encoder': 'BAAI/bge-large-en-v1.5',
+    'freeze_ratio': 0.85,
+    'device': 'cuda'
+}
+
+model = create_vjepa_model(config)
+```
+
+---
+
+## Architecture Details
+
+### V-JEPA2 ViT-Giant
+
+The model uses a Vision Transformer Giant (ViT-G) architecture with:
+
+- **Patch Size**: 16×16
+- **Frame Configuration**: 64 frames per clip
+- **Resolution**: 384×384
+- **Hidden Size**: 1408
+- **Attention**: Scaled dot-product attention (SDPA)
+- **Precision**: FP32 for stable gradients
+
+### Strategic Layer Freezing
+
+The model implements strategic freezing to reduce memory and improve training:
+
+1. **Always Frozen**:
+   - Embedding layers
+   - Pooler layers
+
+2. **Conditionally Frozen** (based on `freeze_ratio`):
+   - Bottom 85% of transformer layers (default)
+   - Top 15% remain trainable
+
+3. **Benefits**:
+   - ~85% reduction in gradient computation
+   - Lower memory usage
+   - Faster training
+   - Better generalization
+
+### Discriminative Learning Rates
+
+Recommended learning rate hierarchy:
+
+```python
+{
+    'text_encoder': 1e-5,      # Lowest LR
+    'video_encoder': 5e-5,     # Medium LR
+    'prediction_head': 1e-4    # Highest LR
+}
+```
+
+This approach allows:
+- Minimal adaptation of pretrained encoders
+- Faster learning for task-specific head
+- Better stability during training
+
+### Model Statistics
+
+For the default configuration:
+
+- **Total Parameters**: ~1.9B
+- **Trainable Parameters**: ~300M (with 85% freezing)
+- **Model Size**: ~7.6 GB
+- **Trainable Size**: ~1.2 GB
+- **Memory Savings**: ~85% reduction in gradient computation
+
+### Output Format
+
+All MOS predictions follow the format (B, 5):
+
+1. **Index 0**: Traditional Quality (blur, noise, compression)
+2. **Index 1**: Alignment (video-text semantic alignment)
+3. **Index 2**: Aesthetic Quality (visual appeal)
+4. **Index 3**: Temporal Consistency (smoothness across frames)
+5. **Index 4**: Overall Quality (weighted combination)

@@ -1,0 +1,431 @@
+---
+title: 'Quality Dimensions'
+description: 'Understanding the 4 quality metrics for AI-generated video assessment'
+icon: 'gauge'
+---
+
+## Overview
+
+QualiVision evaluates AI-generated videos across **4 critical quality dimensions**, each capturing a distinct aspect of video quality. These dimensions are designed specifically for AI-generated content where traditional quality metrics may fall short.
+
+<CardGroup cols={2}>
+  <Card title="Temporal Consistency" icon="clock">
+    Coherence and smoothness across video frames
+  </Card>
+  
+  <Card title="Image Fidelity" icon="image">
+    Visual quality, sharpness, and technical excellence
+  </Card>
+  
+  <Card title="Aesthetic Appeal" icon="palette">
+    Artistic quality and visual attractiveness
+  </Card>
+  
+  <Card title="Text-Video Alignment" icon="align-center">
+    Correspondence between prompt and generated content
+  </Card>
+</CardGroup>
+
+From the README (`README.md:11-15`):
+```markdown
+## 🎯 Overview
+
+Our approach addresses four critical quality dimensions for AI-generated videos:
+- **Temporal Consistency**: Coherence across frames
+- **Image Fidelity**: Visual quality and sharpness  
+- **Aesthetic Appeal**: Artistic and visual attractiveness
+- **Text-Video Alignment**: Correspondence between prompt and content
+```
+
+## The 4 Quality Dimensions
+
+### 1. Temporal Consistency
+
+<Tabs>
+  <Tab title="Definition">
+    **Temporal Consistency** measures how smoothly and coherently a video transitions across frames. This is especially critical for AI-generated videos which often suffer from temporal artifacts.
+    
+    **Key Aspects**:
+    - Frame-to-frame coherence
+    - Motion smoothness
+    - Object permanence (objects don't appear/disappear)
+    - Consistent lighting and colors across time
+    - Stable backgrounds
+  </Tab>
+  
+  <Tab title="Common Issues">
+    Problems in temporal consistency for AI-generated videos:
+    
+    - **Flickering**: Colors or brightness jumping between frames
+    - **Morphing**: Objects changing shape unexpectedly
+    - **Discontinuities**: Sudden jumps or cuts in motion
+    - **Drift**: Gradual changes in style or appearance
+    - **Jitter**: Unstable camera or object movements
+    
+    <Warning>
+    Temporal inconsistency is the **most common failure mode** in AI video generation. Even state-of-the-art models struggle with maintaining coherence over long sequences.
+    </Warning>
+  </Tab>
+  
+  <Tab title="How Models Assess It">
+    **DOVER++**: The ConvNeXt 3D backbone with temporal convolutions:
+    ```python
+    # 3D convolutions capture temporal patterns
+    nn.Conv3d(dim, dim, kernel_size=7, padding=3, groups=dim)
+    # kernel_size=7 includes temporal dimension
+    ```
+    
+    **V-JEPA2**: The ViT processes all 64 frames jointly:
+    - Self-attention across frame patches
+    - CLS token aggregates temporal information
+    - Pretrained on video data captures motion priors
+  </Tab>
+</Tabs>
+
+### 2. Image Fidelity
+
+<Tabs>
+  <Tab title="Definition">
+    **Image Fidelity** (also called Traditional MOS) assesses the technical quality of individual frames and the video as a whole.
+    
+    **Key Aspects**:
+    - Sharpness and clarity
+    - Resolution and detail
+    - Absence of compression artifacts
+    - Color accuracy
+    - Noise levels
+    - Contrast and brightness
+  </Tab>
+  
+  <Tab title="Metrics">
+    Traditional image quality metrics that contribute:
+    
+    | Metric | Measures |
+    |--------|----------|
+    | PSNR | Peak signal-to-noise ratio |
+    | SSIM | Structural similarity |
+    | Sharpness | Edge strength and clarity |
+    | Noise | Unwanted variations |
+    | Artifacts | Compression/generation errors |
+  </Tab>
+  
+  <Tab title="How Models Assess It">
+    **DOVER++**: Separate technical quality head:
+    
+    From `dover_model.py:109-116`:
+    ```python
+    self.technical_head = nn.Sequential(
+        nn.AdaptiveAvgPool3d(1),
+        nn.Flatten(),
+        nn.Linear(768, 256),
+        nn.ReLU(inplace=True),
+        nn.Dropout(0.1),
+        nn.Linear(256, 1)  # Technical quality score
+    )
+    ```
+    
+    **V-JEPA2**: High-resolution features (1408-dim) from ViT-Giant capture fine-grained quality details
+  </Tab>
+</Tabs>
+
+### 3. Aesthetic Appeal
+
+<Tabs>
+  <Tab title="Definition">
+    **Aesthetic Appeal** measures the artistic and visual attractiveness of the video, beyond pure technical quality.
+    
+    **Key Aspects**:
+    - Composition and framing
+    - Color harmony and palette
+    - Visual creativity
+    - Artistic style
+    - Emotional impact
+    - Overall visual appeal
+  </Tab>
+  
+  <Tab title="Subjective Nature">
+    <Note>
+    Aesthetic appeal is the **most subjective** dimension. What looks beautiful varies across cultures, contexts, and individual preferences. AI models learn aesthetic preferences from training data annotations.
+    </Note>
+    
+    **Factors Influencing Aesthetics**:
+    - **Rule of thirds**: Composition guidelines
+    - **Color theory**: Complementary vs. analogous colors
+    - **Lighting**: Golden hour, dramatic shadows
+    - **Depth**: Bokeh, foreground/background separation
+    - **Symmetry**: Balance and patterns
+  </Tab>
+  
+  <Tab title="How Models Assess It">
+    **DOVER++**: Dedicated aesthetic quality head:
+    
+    From `dover_model.py:99-107`:
+    ```python
+    self.aesthetic_head = nn.Sequential(
+        nn.AdaptiveAvgPool3d(1),
+        nn.Flatten(),
+        nn.Linear(768, 256),
+        nn.ReLU(inplace=True),
+        nn.Dropout(0.1),
+        nn.Linear(256, 1)  # Aesthetic quality score
+    )
+    ```
+    
+    **Disentangled from Technical Quality**: DOVER++ explicitly separates aesthetic from technical assessment, recognizing that a video can be technically perfect but aesthetically boring, or vice versa.
+  </Tab>
+</Tabs>
+
+### 4. Text-Video Alignment
+
+<Tabs>
+  <Tab title="Definition">
+    **Text-Video Alignment** measures how well the generated video matches the input text prompt.
+    
+    **Key Aspects**:
+    - Semantic correspondence (objects, actions, scenes)
+    - Attribute accuracy (colors, sizes, quantities)
+    - Action/motion alignment
+    - Scene composition
+    - Overall prompt fidelity
+  </Tab>
+  
+  <Tab title="Examples">
+    <Expandable title="Good Alignment Examples">
+    **Prompt**: "A cat playing piano in a sunlit room"
+    
+    ✅ **Good**: Shows a cat, near a piano, with paws on keys, in a bright room
+    
+    ✅ **Perfect**: Cat actively pressing piano keys, visible sunlight streaming through window
+    
+    ❌ **Poor**: Cat sitting near piano but not interacting
+    
+    ❌ **Bad**: Cat in dark room, no piano visible
+    </Expandable>
+    
+    <Expandable title="Challenging Alignment Cases">
+    **Prompt**: "A robot juggling three red balls in a garden"
+    
+    **Challenges**:
+    - **Count accuracy**: Exactly 3 balls (not 2 or 4)
+    - **Color accuracy**: Red (not orange or pink)
+    - **Action**: Active juggling motion (not just holding)
+    - **Setting**: Garden environment (grass, plants, outdoor)
+    
+    AI models often struggle with:
+    - Specific counts ("three" vs. "several")
+    - Fine-grained attributes ("scarlet" vs. "crimson")
+    - Complex actions ("juggling" vs. "throwing")
+    </Expandable>
+  </Tab>
+  
+  <Tab title="How Models Assess It">
+    **Cross-Modal Understanding** is key. Both models encode text and video, then compare:
+    
+    **DOVER++**: Quality-aware fusion with cross-modal attention
+    
+    From `dover_model.py:265-277`:
+    ```python
+    # Text queries attend to video features
+    attended_dover, _ = self.cross_attention(
+        query=text_proj_seq,      # Text guides attention
+        key=dover_proj_seq,        # Video features
+        value=dover_proj_seq       # Video features
+    )
+    
+    # Combine attended video + text
+    combined_features = torch.cat([attended_dover, text_proj], dim=-1)
+    fused_features = self.fusion_layer(combined_features)
+    ```
+    
+    **V-JEPA2**: Simple concatenation leverages pretrained embeddings
+    
+    From `vjepa_model.py:46-57`:
+    ```python
+    def forward(self, v: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        # v: Video features from ViT (B, 1408)
+        # t: Text features from BGE (B, 768)
+        return self.net(torch.cat([v, t], dim=-1))  # Joint prediction
+    ```
+  </Tab>
+</Tabs>
+
+## Overall MOS Score
+
+The **Overall MOS** is a weighted combination of the 4 sub-dimensions:
+
+```python
+# From dataset.py:37
+MOS_COLS = ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 'Temporal_MOS', 'Overall_MOS']
+```
+
+<Info>
+All 5 scores are predicted simultaneously by the model. The Overall MOS is **not** computed as a manual average, but rather learned end-to-end during training. This allows the model to learn adaptive weighting based on video characteristics.
+</Info>
+
+## MOS Score Scale
+
+All scores follow the **Mean Opinion Score (MOS)** scale:
+
+| Score | Quality Level | Description |
+|-------|---------------|-------------|
+| 5.0 | Excellent | Professional quality, no noticeable issues |
+| 4.0 | Good | High quality with minor imperfections |
+| 3.0 | Fair | Acceptable quality, some noticeable issues |
+| 2.0 | Poor | Significant quality problems |
+| 1.0 | Bad | Severe quality degradation |
+
+From `README.md:56`:
+```markdown
+- **Quality Normalization**: MOS scores standardized to 1-5 scale
+```
+
+## Quality-Aware Weighting
+
+DOVER++ implements **dynamic quality weighting** based on text prompts:
+
+From `dover_model.py:211-218`:
+```python
+# Quality aspect classifier
+self.quality_classifier = nn.Sequential(
+    nn.Linear(text_dim, hidden_dim),
+    nn.ReLU(inplace=True),
+    nn.Dropout(0.1),
+    nn.Linear(hidden_dim, 4),  # 4 quality aspects
+    nn.Softmax(dim=-1)
+)
+```
+
+**How It Works**:
+
+1. **Text Analysis**: Prompt is encoded and classified into quality aspects
+2. **Weight Generation**: 4 weights (sum to 1) for each dimension
+3. **Adaptive Fusion**: Model emphasizes relevant quality aspects
+
+**Example**:
+
+<Tabs>
+  <Tab title="Motion-Focused Prompt">
+    **Prompt**: "A dancer performing smooth, flowing movements"
+    
+    **Quality Weights** (example):
+    - Traditional: 0.15
+    - Alignment: 0.20
+    - Aesthetic: 0.15
+    - **Temporal: 0.50** ← Highest weight
+    
+    Model focuses on temporal consistency for motion-heavy content
+  </Tab>
+  
+  <Tab title="Aesthetic Prompt">
+    **Prompt**: "A beautiful sunset over mountains with vibrant colors"
+    
+    **Quality Weights** (example):
+    - Traditional: 0.20
+    - Alignment: 0.25
+    - **Aesthetic: 0.45** ← Highest weight
+    - Temporal: 0.10
+    
+    Model prioritizes aesthetic appeal for scenic content
+  </Tab>
+  
+  <Tab title="Object-Focused Prompt">
+    **Prompt**: "A red car parked next to a blue house"
+    
+    **Quality Weights** (example):
+    - Traditional: 0.25
+    - **Alignment: 0.50** ← Highest weight
+    - Aesthetic: 0.15
+    - Temporal: 0.10
+    
+    Model emphasizes text-video alignment for attribute-specific prompts
+  </Tab>
+</Tabs>
+
+## Dataset Annotations
+
+From the TaobaoVD-GC dataset (`README.md:46-50`):
+```csv
+video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+video002.mp4,"Sunset over mountains",4.5,4.2,4.8,4.1,4.4
+```
+
+**Annotation Process**:
+- Human raters watch videos
+- Score each dimension independently (1-5)
+- Multiple raters per video (averaged)
+- Overall MOS typically correlates with lowest sub-dimension
+
+## How Each Model Addresses Quality Dimensions
+
+<Tabs>
+  <Tab title="DOVER++">
+    | Dimension | Mechanism |
+    |-----------|----------|
+    | **Temporal Consistency** | 3D ConvNeXt temporal convolutions (kernel size 7) |
+    | **Image Fidelity** | Dedicated technical quality head on backbone features |
+    | **Aesthetic Appeal** | Dedicated aesthetic quality head on backbone features |
+    | **Text-Video Alignment** | Cross-modal attention between text and video features |
+    
+    **Key Innovation**: Explicit disentanglement of aesthetic vs. technical quality with separate prediction heads
+  </Tab>
+  
+  <Tab title="V-JEPA2">
+    | Dimension | Mechanism |
+    |-----------|----------|
+    | **Temporal Consistency** | Self-attention across 64 frame patches in ViT |
+    | **Image Fidelity** | High-resolution ViT-Giant features (1408-dim) |
+    | **Aesthetic Appeal** | Pretrained on diverse video data captures aesthetic patterns |
+    | **Text-Video Alignment** | Concatenated video-text features in prediction head |
+    
+    **Key Innovation**: Massive pretrained ViT with strategic freezing for memory-efficient fine-tuning
+  </Tab>
+  
+  <Tab title="Comparison">
+    | Aspect | DOVER++ | V-JEPA2 |
+    |--------|---------|----------|
+    | Temporal modeling | Explicit 3D convolutions | Implicit self-attention |
+    | Aesthetic/technical | Disentangled heads | Unified representation |
+    | Text fusion | Cross-modal attention | Simple concatenation |
+    | Specialization | Quality-specific design | General video understanding |
+    | Best for | Fine-grained quality | Semantic alignment |
+  </Tab>
+</Tabs>
+
+## Evaluation Metrics
+
+Model performance measured per dimension:
+
+From `config.py:109-111`:
+```python
+EVAL_CONFIG = {
+    "metrics": ["spearman", "pearson"],
+}
+```
+
+**Metrics**:
+- **Spearman Correlation (SROCC)**: Rank-order correlation (preferred for MOS)
+- **Pearson Correlation (PLCC)**: Linear correlation
+
+**Per-Dimension Evaluation**:
+```python
+for dimension in ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 'Temporal_MOS', 'Overall_MOS']:
+    srocc = spearmanr(predictions[dimension], ground_truth[dimension])
+    plcc = pearsonr(predictions[dimension], ground_truth[dimension])
+```
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="DOVER++ Model" icon="brain" href="/concepts/dover-model">
+    Quality-aware architecture details
+  </Card>
+  
+  <Card title="V-JEPA2 Model" icon="microchip" href="/concepts/vjepa-model">
+    ViT-based quality assessment
+  </Card>
+  
+  <Card title="Data Preprocessing" icon="filter" href="/concepts/data-preprocessing">
+    How quality labels are processed
+  </Card>
+</CardGroup>

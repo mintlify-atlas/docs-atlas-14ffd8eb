@@ -1,0 +1,471 @@
+---
+title: 'Working with Custom Datasets'
+description: 'Adapt QualiVision to work with your own video quality datasets'
+icon: 'database'
+---
+
+## Overview
+
+QualiVision can be adapted to work with custom video quality datasets beyond the VQualA 2025 Challenge. This guide covers data structure requirements, format specifications, and code adaptations.
+
+## Dataset Structure Requirements
+
+QualiVision expects a specific directory structure (README.md:22):
+
+```bash
+data/
+├── train/
+│   ├── labels/
+│   │   └── train_labels.csv
+│   └── videos/
+│       ├── video001.mp4
+│       ├── video002.mp4
+│       └── ...
+├── val/
+│   ├── labels/
+│   │   └── val_labels.csv
+│   └── videos/
+│       ├── val_video001.mp4
+│       └── ...
+└── test/
+    ├── test_labels.csv
+    └── videos/
+        ├── test_video001.mp4
+        └── ...
+```
+
+<Warning>
+The directory structure must be followed exactly. The training and evaluation scripts expect labels in `labels/` subdirectories and videos in `videos/` subdirectories.
+</Warning>
+
+## CSV Format Requirements
+
+### Standard Format (VQualA)
+
+The expected CSV format (README.md:45):
+
+```csv
+video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+video002.mp4,"Sunset over mountains",4.5,4.2,4.8,4.1,4.4
+video003.mp4,"City traffic at night",2.8,3.5,3.2,2.9,3.1
+```
+
+**Required Columns:**
+- `video_name`: Filename of the video (must match files in `videos/` directory)
+- `Prompt`: Text description or prompt used to generate the video
+- `Traditional_MOS`: Image fidelity/technical quality score (1-5)
+- `Alignment_MOS`: Text-video alignment score (1-5)
+- `Aesthetic_MOS`: Visual appeal/aesthetic score (1-5)
+- `Temporal_MOS`: Temporal consistency score (1-5)
+- `Overall_MOS`: Overall quality score (1-5)
+
+### Column Configuration
+
+The expected columns are defined in `src/config/config.py:98`:
+
+```python
+DATASET_CONFIG = {
+    "mos_columns": ["Traditional_MOS", "Alignment_MOS", 
+                    "Aesthetic_MOS", "Temporal_MOS", "Overall_MOS"],
+    "text_column": "Prompt",
+    "video_column": "video_name",
+    "max_text_length": 512,
+    "video_extensions": [".mp4", ".avi", ".mov", ".mkv"]
+}
+```
+
+## MOS Score Scale
+
+### Standard Scale (1-5)
+
+All MOS (Mean Opinion Score) values should be on a **1-5 scale**:
+
+| Score Range | Quality Level | Description |
+|-------------|---------------|-------------|
+| 4.5 - 5.0 | Excellent | Imperceptible artifacts, high quality |
+| 3.5 - 4.5 | Good | Perceptible but not annoying artifacts |
+| 2.5 - 3.5 | Fair | Slightly annoying artifacts |
+| 1.5 - 2.5 | Poor | Annoying artifacts |
+| 1.0 - 1.5 | Bad | Very annoying artifacts |
+
+### Score Normalization
+
+If your dataset uses a different scale, normalize to 1-5:
+
+<CodeGroup>
+```python From 0-100
+def normalize_score(score):
+    """Convert 0-100 score to 1-5 scale."""
+    return (score / 100) * 4 + 1
+
+# Example: 75/100 -> 4.0
+```
+
+```python From 0-10
+def normalize_score(score):
+    """Convert 0-10 score to 1-5 scale."""
+    return (score / 10) * 4 + 1
+
+# Example: 7.5/10 -> 4.0
+```
+
+```python From 1-7
+def normalize_score(score):
+    """Convert 1-7 score to 1-5 scale."""
+    return ((score - 1) / 6) * 4 + 1
+
+# Example: 5/7 -> 3.67
+```
+</CodeGroup>
+
+## Video Format Requirements
+
+### Supported Formats
+
+Supported video file extensions (src/config/config.py:105):
+- `.mp4` (recommended)
+- `.avi`
+- `.mov`
+- `.mkv`
+
+### Video Processing
+
+Videos are automatically processed during data loading (README.md:52):
+
+**Frame Sampling:**
+- **Uniform temporal sampling** of **64 frames** per video
+- Works with videos of any duration
+- Ensures consistent input size
+
+**Resolution Adaptation:**
+- **DOVER++**: Resized to 640×640
+- **V-JEPA2**: Resized to 384×384
+- Automatic aspect ratio handling
+
+<Tip>
+No manual video preprocessing is required. The data loaders handle all transformations automatically.
+</Tip>
+
+## Adapting for Different Use Cases
+
+### Simplified Quality Assessment
+
+If you only have **Overall MOS** scores:
+
+<Steps>
+  <Step title="Create CSV with Repeated Scores">
+    ```csv
+    video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+    video001.mp4,"Description",3.5,3.5,3.5,3.5,3.5
+    video002.mp4,"Description",4.2,4.2,4.2,4.2,4.2
+    ```
+    
+    Use the same overall score for all dimensions.
+  </Step>
+
+  <Step title="Modify Loss Function">
+    Edit `src/utils/training.py:145` to only compute loss on Overall MOS:
+    
+    ```python
+    # Only use last column (Overall_MOS)
+    smooth_l1_loss = F.smooth_l1_loss(pred[:, -1], target[:, -1], beta=self.smooth_l1_beta)
+    ```
+  </Step>
+</Steps>
+
+### Non-AI Generated Videos
+
+For natural/user-generated video datasets:
+
+<Steps>
+  <Step title="Add Generic Descriptions">
+    If you don't have prompts, add generic descriptions:
+    
+    ```csv
+    video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+    nature001.mp4,"A video sequence",3.5,3.5,3.5,3.5,3.5
+    sports002.mp4,"A video sequence",4.2,4.2,4.2,4.2,4.2
+    ```
+  </Step>
+
+  <Step title="Consider Removing Text Alignment">
+    For datasets without text-video correspondence, you may want to:
+    - Set Alignment_MOS = Overall_MOS
+    - Or modify the model to ignore text embeddings
+  </Step>
+</Steps>
+
+### Different Quality Dimensions
+
+To use different quality dimensions:
+
+<Steps>
+  <Step title="Update Dataset Config">
+    Edit `src/config/config.py:98`:
+    
+    ```python
+    DATASET_CONFIG = {
+        "mos_columns": ["Sharpness", "Noise", "Compression", "Overall"],
+        "text_column": "Description",
+        "video_column": "filename"
+    }
+    ```
+  </Step>
+
+  <Step title="Adjust CSV Format">
+    ```csv
+    filename,Description,Sharpness,Noise,Compression,Overall
+    vid001.mp4,"Scene description",4.2,3.8,4.1,4.0
+    vid002.mp4,"Scene description",3.5,4.2,3.9,3.9
+    ```
+  </Step>
+
+  <Step title="Update Model Output">
+    Modify the quality head to output the correct number of dimensions (default is 5).
+  </Step>
+</Steps>
+
+## Text Processing
+
+### Prompt Requirements
+
+Text prompts are processed using BGE-Large embeddings (README.md:55):
+
+**Model:** BAAI/bge-large-en-v1.5
+**Max length:** 512 tokens
+**Embedding dimension:** 1024
+
+### Handling Missing Prompts
+
+If some videos lack prompts:
+
+```csv
+video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+video002.mp4,"",4.5,4.5,4.8,4.1,4.4
+```
+
+Empty strings will receive default embeddings. For better results, add generic descriptions.
+
+## Data Validation
+
+Validate your dataset before training:
+
+<CodeGroup>
+```python Check File Existence
+import pandas as pd
+from pathlib import Path
+
+def validate_dataset(csv_path, video_dir):
+    """Validate that all videos exist."""
+    df = pd.read_csv(csv_path)
+    missing = []
+    
+    for video_name in df['video_name']:
+        video_path = Path(video_dir) / video_name
+        if not video_path.exists():
+            missing.append(video_name)
+    
+    if missing:
+        print(f"Missing {len(missing)} videos:")
+        for v in missing[:10]:  # Show first 10
+            print(f"  - {v}")
+        return False
+    
+    print(f"✓ All {len(df)} videos found")
+    return True
+
+# Usage
+validate_dataset('data/train/labels/train_labels.csv', 'data/train/videos')
+```
+
+```python Check Score Ranges
+import pandas as pd
+
+def validate_scores(csv_path):
+    """Validate MOS scores are in 1-5 range."""
+    df = pd.read_csv(csv_path)
+    mos_cols = ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 
+                'Temporal_MOS', 'Overall_MOS']
+    
+    for col in mos_cols:
+        if col not in df.columns:
+            print(f"✗ Missing column: {col}")
+            return False
+        
+        if (df[col] < 1.0).any() or (df[col] > 5.0).any():
+            print(f"✗ {col} has scores outside 1-5 range")
+            print(f"  Min: {df[col].min()}, Max: {df[col].max()}")
+            return False
+    
+    print("✓ All scores in valid range (1-5)")
+    return True
+
+# Usage
+validate_scores('data/train/labels/train_labels.csv')
+```
+
+```python Check for Missing Values
+import pandas as pd
+
+def check_missing_values(csv_path):
+    """Check for missing values in CSV."""
+    df = pd.read_csv(csv_path)
+    missing = df.isnull().sum()
+    
+    if missing.any():
+        print("✗ Missing values found:")
+        print(missing[missing > 0])
+        return False
+    
+    print("✓ No missing values")
+    return True
+
+# Usage
+check_missing_values('data/train/labels/train_labels.csv')
+```
+</CodeGroup>
+
+## Data Split Recommendations
+
+### Standard Split
+
+For datasets with **1000+ samples**:
+- **Training**: 70-80%
+- **Validation**: 10-15%
+- **Test**: 10-20%
+
+### Small Dataset (less than 500 samples)
+
+For limited data:
+- **Training**: 60-70%
+- **Validation**: 15-20%
+- **Test**: 15-20%
+
+Consider using **k-fold cross-validation** for more robust evaluation.
+
+### Stratified Splitting
+
+Ensure balanced quality distribution:
+
+```python
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+def stratified_split(csv_path):
+    """Create stratified split based on quality bins."""
+    df = pd.read_csv(csv_path)
+    
+    # Create quality bins
+    df['quality_bin'] = pd.cut(df['Overall_MOS'], 
+                                bins=[1.0, 2.5, 3.5, 4.5, 5.0],
+                                labels=['poor', 'fair', 'good', 'excellent'])
+    
+    # Split while maintaining distribution
+    train, temp = train_test_split(df, test_size=0.3, 
+                                     stratify=df['quality_bin'],
+                                     random_state=42)
+    val, test = train_test_split(temp, test_size=0.5,
+                                  stratify=temp['quality_bin'],
+                                  random_state=42)
+    
+    # Save splits
+    train.drop('quality_bin', axis=1).to_csv('data/train/labels/train_labels.csv', index=False)
+    val.drop('quality_bin', axis=1).to_csv('data/val/labels/val_labels.csv', index=False)
+    test.drop('quality_bin', axis=1).to_csv('data/test/test_labels.csv', index=False)
+    
+    print(f"Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+
+# Usage
+stratified_split('data/all_labels.csv')
+```
+
+## Example: Converting from LSVQ Dataset
+
+LiveStreaming Video Quality (LSVQ) dataset conversion example:
+
+```python
+import pandas as pd
+import shutil
+from pathlib import Path
+
+def convert_lsvq_to_qualivision(lsvq_csv, lsvq_videos, output_dir):
+    """Convert LSVQ format to QualiVision format."""
+    # Read LSVQ CSV (has columns: name, mos)
+    lsvq_df = pd.read_csv(lsvq_csv)
+    
+    # Create QualiVision format
+    qualivision_df = pd.DataFrame({
+        'video_name': lsvq_df['name'],
+        'Prompt': 'A livestreaming video',  # Generic prompt
+        'Traditional_MOS': lsvq_df['mos'],
+        'Alignment_MOS': lsvq_df['mos'],    # Use overall MOS
+        'Aesthetic_MOS': lsvq_df['mos'],    # Use overall MOS
+        'Temporal_MOS': lsvq_df['mos'],     # Use overall MOS
+        'Overall_MOS': lsvq_df['mos']
+    })
+    
+    # Normalize scores from 0-100 to 1-5 if needed
+    if qualivision_df['Overall_MOS'].max() > 5:
+        for col in ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 'Temporal_MOS', 'Overall_MOS']:
+            qualivision_df[col] = (qualivision_df[col] / 100) * 4 + 1
+    
+    # Create directory structure
+    output_path = Path(output_dir)
+    (output_path / 'labels').mkdir(parents=True, exist_ok=True)
+    (output_path / 'videos').mkdir(parents=True, exist_ok=True)
+    
+    # Copy videos
+    for video_name in qualivision_df['video_name']:
+        src = Path(lsvq_videos) / video_name
+        dst = output_path / 'videos' / video_name
+        if src.exists():
+            shutil.copy(src, dst)
+    
+    # Save CSV
+    qualivision_df.to_csv(output_path / 'labels' / 'train_labels.csv', index=False)
+    print(f"✓ Converted {len(qualivision_df)} videos to QualiVision format")
+
+# Usage
+convert_lsvq_to_qualivision(
+    'path/to/lsvq_labels.csv',
+    'path/to/lsvq_videos/',
+    'data/train/'
+)
+```
+
+## Troubleshooting
+
+### "File not found" Errors
+
+Ensure video filenames in CSV exactly match file names:
+```bash
+# Check for case sensitivity and extensions
+ls data/train/videos/ | head
+head data/train/labels/train_labels.csv
+```
+
+### Shape Mismatch Errors
+
+Verify you have exactly 5 MOS columns. Check with:
+```python
+import pandas as pd
+df = pd.read_csv('data/train/labels/train_labels.csv')
+print(df.columns.tolist())
+```
+
+### Memory Issues with Large Datasets
+
+Reduce batch size and enable gradient accumulation (handled automatically).
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Training Guide" icon="dumbbell" href="/guides/training">
+    Train models on your custom data
+  </Card>
+  <Card title="Memory Optimization" icon="memory" href="/guides/memory-optimization">
+    Optimize for large-scale training
+  </Card>
+</CardGroup>

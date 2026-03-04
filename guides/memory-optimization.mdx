@@ -1,0 +1,550 @@
+---
+title: 'Memory Optimization'
+description: 'Advanced techniques for efficient GPU memory usage during training and evaluation'
+icon: 'memory'
+---
+
+## Overview
+
+QualiVision includes multiple memory optimization strategies to enable training on consumer GPUs. This guide covers batch size tuning, gradient accumulation, layer freezing, and memory cleanup utilities.
+
+## Quick Memory Settings
+
+### GPU Memory Requirements
+
+| GPU | VRAM | DOVER++ Batch Size | V-JEPA2 Batch Size |
+|-----|------|-------------------|--------------------|
+| RTX 3090 | 24GB | 2-3 | 2 |
+| RTX 4090 | 24GB | 3-4 | 2-3 |
+| V100 | 32GB | 4 | 4 |
+| A100 (40GB) | 40GB | 4-6 | 6 |
+| A100 (80GB) | 80GB | 8+ | 8+ |
+
+<Warning>
+These are conservative estimates. Your actual capacity may vary based on system overhead and other processes.
+</Warning>
+
+## Batch Size Adjustment
+
+### Command-Line Configuration
+
+The simplest optimization is adjusting batch size:
+
+<CodeGroup>
+```bash DOVER++ (12GB GPU)
+python scripts/train.py \
+    --model dover \
+    --data data/ \
+    --batch-size 2 \
+    --epochs 5
+```
+
+```bash V-JEPA2 (16GB GPU)
+python scripts/train.py \
+    --model vjepa \
+    --data data/ \
+    --batch-size 2 \
+    --epochs 10
+```
+
+```bash High Memory Setup
+python scripts/train.py \
+    --model dover \
+    --data data/ \
+    --batch-size 8 \
+    --epochs 5
+```
+</CodeGroup>
+
+### Default Batch Sizes
+
+Configured in `src/config/config.py:21`:
+
+<CodeGroup>
+```python DOVER++ Default
+DOVER_CONFIG = {
+    "batch_size": 4,
+    "gradient_accumulation_steps": 8,
+    "effective_batch_size": 32  # 4 × 8
+}
+```
+
+```python V-JEPA2 Default
+VJEPA_CONFIG = {
+    "batch_size": 6,
+    "gradient_accumulation_steps": 32,
+    "effective_batch_size": 192  # 6 × 32
+}
+```
+</CodeGroup>
+
+## Gradient Accumulation
+
+### How It Works
+
+Gradient accumulation allows simulating larger batch sizes without increased memory:
+
+```python
+# From src/utils/training.py:210
+accumulation_steps = 8  # DOVER++ default
+
+for i, batch in enumerate(train_loader):
+    # Forward pass
+    loss = loss / accumulation_steps
+    scaler.scale(loss).backward()
+    
+    # Update every N batches
+    if (i + 1) % accumulation_steps == 0:
+        scaler.step(optimizer)
+        optimizer.zero_grad()
+```
+
+**Benefits:**
+- Maintains effective batch size for stable training
+- Reduces memory usage
+- No change to convergence behavior
+
+**Trade-offs:**
+- Slower training (more iterations per update)
+- Same statistical properties as larger batches
+
+### Configuration
+
+Gradient accumulation is automatic but can be configured in `src/config/config.py:33`:
+
+```python
+DOVER_CONFIG = {
+    "gradient_accumulation_steps": 8,  # Adjust this
+    # ...
+}
+```
+
+**Recommended values:**
+- **Batch size 4**: 8 steps (effective: 32)
+- **Batch size 2**: 16 steps (effective: 32)
+- **Batch size 1**: 32 steps (effective: 32)
+
+<Tip>
+Keep `effective_batch_size = batch_size × gradient_accumulation_steps` constant for consistent training dynamics.
+</Tip>
+
+## Strategic Layer Freezing
+
+### V-JEPA2 Freezing Strategy
+
+V-JEPA2 uses aggressive layer freezing to reduce memory and enable efficient fine-tuning (src/config/config.py:43):
+
+```python
+VJEPA_CONFIG = {
+    "freeze_ratio": 0.85,  # Freeze bottom 85% of layers
+    # ...
+}
+```
+
+**Implementation** (from model architecture):
+```python
+# Freeze bottom 85% of vision transformer layers
+num_layers = len(model.encoder.layers)
+freeze_until = int(num_layers * 0.85)
+
+for i, layer in enumerate(model.encoder.layers):
+    if i < freeze_until:
+        for param in layer.parameters():
+            param.requires_grad = False
+```
+
+**Memory Savings:**
+- **Full model**: ~1.1B parameters, ~16GB
+- **With freezing**: ~165M trainable, ~10GB
+- **Reduction**: ~37% memory savings
+
+**Performance Impact:**
+- Minimal degradation on fine-tuning tasks
+- Faster training (fewer gradients to compute)
+- Better generalization (prevents overfitting)
+
+### Custom Freezing Ratios
+
+Adjust the freeze ratio for your use case:
+
+| Freeze Ratio | Trainable Params | Memory Usage | Use Case |
+|--------------|------------------|--------------|----------|
+| 0.95 | ~55M | ~8GB | Very limited GPU |
+| 0.90 | ~110M | ~9GB | Standard fine-tuning |
+| 0.85 | ~165M | ~10GB | **Default (recommended)** |
+| 0.75 | ~275M | ~12GB | More adaptation needed |
+| 0.50 | ~550M | ~14GB | Significant domain shift |
+
+<Warning>
+Freeze ratios below 0.75 may increase overfitting risk on small datasets.
+</Warning>
+
+## Mixed Precision Training
+
+### Automatic Mixed Precision (AMP)
+
+Enabled by default (src/config/config.py:62):
+
+```python
+TRAINING_CONFIG = {
+    "mixed_precision": True,
+    # ...
+}
+```
+
+**Implementation** (from src/utils/training.py:255):
+
+```python
+from torch.cuda.amp import GradScaler
+
+scaler = GradScaler()
+
+# Training loop
+with torch.cuda.amp.autocast():
+    outputs = model(batch['pixel_values_videos'], batch['prompts'])
+    loss = loss_fn(outputs, batch['labels'])
+
+scaler.scale(loss).backward()
+scaler.step(optimizer)
+scaler.update()
+```
+
+**Benefits:**
+- **~40% memory reduction** from FP16 tensors
+- **~2x faster** computation on Tensor Core GPUs (V100, A100, RTX series)
+- Minimal accuracy impact with gradient scaling
+
+**Memory Breakdown:**
+
+| Component | FP32 | FP16 (AMP) | Savings |
+|-----------|------|------------|----------|
+| Model weights | 8GB | 4GB | 50% |
+| Activations | 6GB | 3GB | 50% |
+| Gradients | 8GB | 4GB | 50% |
+| Optimizer | 16GB | 12GB | 25% |
+| **Total** | **38GB** | **23GB** | **~40%** |
+
+## Memory Cleanup Utilities
+
+### Ultra Memory Cleanup
+
+Aggressive memory cleanup function (src/utils/memory.py:12):
+
+```python
+def ultra_memory_cleanup():
+    """Aggressive GPU memory cleanup."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+```
+
+**Usage** in training loop (src/utils/training.py:302):
+
+```python
+for i, batch in enumerate(train_loader):
+    # Training step...
+    
+    # Cleanup every 10 batches
+    if i % 10 == 0:
+        ultra_memory_cleanup()
+```
+
+**When to use:**
+- After large tensor operations
+- Before evaluation/inference
+- When approaching memory limits
+- After checkpoint saving
+
+### Memory Monitoring
+
+Track memory usage during training (src/utils/memory.py:20):
+
+```python
+def get_gpu_memory_info() -> dict:
+    """Get current GPU memory usage information."""
+    if not torch.cuda.is_available():
+        return {'error': 'CUDA not available'}
+    
+    allocated = torch.cuda.memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    max_allocated = torch.cuda.max_memory_allocated()
+    max_reserved = torch.cuda.max_memory_reserved()
+    
+    return {
+        'allocated_gb': allocated / 1e9,
+        'reserved_gb': reserved / 1e9,
+        'max_allocated_gb': max_allocated / 1e9,
+        'max_reserved_gb': max_reserved / 1e9,
+        'free_gb': (torch.cuda.get_device_properties(0).total_memory - allocated) / 1e9
+    }
+```
+
+**Print memory usage** (src/utils/memory.py:39):
+
+```python
+def print_gpu_memory():
+    """Print current GPU memory usage."""
+    info = get_gpu_memory_info()
+    print(f"GPU Memory - Allocated: {info['allocated_gb']:.1f}GB, "
+          f"Free: {info['free_gb']:.1f}GB, "
+          f"Max Used: {info['max_allocated_gb']:.1f}GB")
+```
+
+**Example output:**
+```
+GPU Memory - Allocated: 8.2GB, Free: 15.8GB, Max Used: 11.4GB
+```
+
+### Memory Monitoring Context Manager
+
+Track memory changes for operations (src/utils/memory.py:51):
+
+```python
+class MemoryMonitor:
+    """Context manager for monitoring memory usage."""
+    
+    def __init__(self, name: str = "Operation"):
+        self.name = name
+    
+    def __enter__(self):
+        self.start_allocated = torch.cuda.memory_allocated()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        end_allocated = torch.cuda.memory_allocated()
+        diff = (end_allocated - self.start_allocated) / 1e9
+        print(f"{self.name} - Memory change: {diff:+.2f}GB")
+```
+
+**Usage:**
+
+```python
+from src.utils.memory import MemoryMonitor
+
+# Track model loading
+with MemoryMonitor("Model Loading"):
+    model = DOVERModel(...)
+
+# Track forward pass
+with MemoryMonitor("Forward Pass"):
+    outputs = model(videos, prompts)
+```
+
+## Advanced Optimization Strategies
+
+### 1. Reduce Video Resolution
+
+For extremely limited memory, reduce input resolution:
+
+```python
+# In src/config/config.py
+DOVER_CONFIG = {
+    "video_resolution": (512, 512),  # Instead of (640, 640)
+    # ...
+}
+
+VJEPA_CONFIG = {
+    "video_resolution": (256, 256),  # Instead of (384, 384)
+    # ...
+}
+```
+
+**Trade-offs:**
+- ✅ Significant memory savings (~30%)
+- ❌ Reduced model accuracy (~2-5%)
+- ✅ Faster training
+
+### 2. Reduce Frame Count
+
+Use fewer frames per video:
+
+```python
+# In src/config/config.py
+DOVER_CONFIG = {
+    "num_frames": 32,  # Instead of 64
+    # ...
+}
+```
+
+**Trade-offs:**
+- ✅ 50% memory reduction for temporal features
+- ❌ May miss temporal artifacts
+- ❌ Lower temporal consistency scores
+
+### 3. Gradient Checkpointing
+
+<Warning>
+Gradient checkpointing is **disabled by default** for V-JEPA2 as it conflicts with layer freezing (src/config/config.py:143).
+</Warning>
+
+For DOVER++, enable if needed:
+
+```python
+# In model initialization
+model.encoder.gradient_checkpointing_enable()
+```
+
+**Trade-offs:**
+- ✅ ~30% memory savings
+- ❌ ~20% slower training (recomputation overhead)
+
+### 4. Data Loading Optimization
+
+Optimize data pipeline (src/config/config.py:73):
+
+```python
+TRAINING_CONFIG = {
+    "num_workers": 4,           # Parallel data loading
+    "pin_memory": True,         # Faster GPU transfer
+    "persistent_workers": True, # Reuse worker processes
+}
+```
+
+**Benefits:**
+- Reduces training time bottlenecks
+- Keeps GPU utilized
+- No memory overhead
+
+## Out-of-Memory Handling
+
+### Automatic OOM Recovery
+
+The training loop includes OOM handling (src/utils/training.py:314):
+
+```python
+try:
+    loss = loss_fn(outputs, labels)
+    loss.backward()
+except RuntimeError as e:
+    if "out of memory" in str(e).lower():
+        print(f"⚠ OOM at batch {i}, skipping...")
+        optimizer.zero_grad(set_to_none=True)
+        ultra_memory_cleanup()
+        continue
+    else:
+        raise e
+```
+
+**Behavior:**
+1. Detects OOM errors
+2. Clears gradients
+3. Runs aggressive cleanup
+4. Skips batch and continues
+5. Logs warning
+
+### Manual Intervention
+
+If training frequently hits OOM:
+
+<Steps>
+  <Step title="Reduce Batch Size">
+    ```bash
+    python scripts/train.py --model dover --batch-size 1 --data data/
+    ```
+  </Step>
+
+  <Step title="Increase Gradient Accumulation">
+    Edit `src/config/config.py:33` to increase `gradient_accumulation_steps`.
+  </Step>
+
+  <Step title="Monitor Peak Memory">
+    ```python
+    from src.utils.memory import print_gpu_memory
+    
+    # After each epoch
+    print_gpu_memory()
+    torch.cuda.reset_peak_memory_stats()
+    ```
+  </Step>
+
+  <Step title="Consider Model Freezing">
+    For V-JEPA2, increase freeze ratio to 0.90 or 0.95.
+  </Step>
+</Steps>
+
+## Memory Usage Patterns
+
+### Training vs Evaluation
+
+| Phase | Memory Usage | Why |
+|-------|--------------|-----|
+| Training | 100% | Gradients + optimizer states |
+| Validation | ~60% | No gradients, smaller batches |
+| Inference | ~40% | No gradients, batch size 1 |
+
+### Memory Timeline
+
+```
+Model Loading:  ████░░░░░░ 40% (weights only)
+First Forward:  ████████░░ 80% (activations allocated)
+First Backward: ██████████ 100% (gradients computed)
+Optimizer Step: ██████████ 100% (optimizer states)
+Cleanup:        ████░░░░░░ 40% (cache cleared)
+```
+
+## Monitoring Commands
+
+Monitor GPU usage during training:
+
+<CodeGroup>
+```bash Watch GPU Usage
+watch -n 1 nvidia-smi
+```
+
+```bash Detailed Memory Stats
+nvidia-smi --query-gpu=timestamp,memory.total,memory.used,memory.free,utilization.gpu --format=csv -l 1
+```
+
+```bash Process-Specific
+nvidia-smi | grep python
+```
+</CodeGroup>
+
+## Best Practices Summary
+
+<Steps>
+  <Step title="Start with Default Settings">
+    Use model defaults and see if they fit in memory.
+  </Step>
+
+  <Step title="Reduce Batch Size First">
+    Halve batch size before other optimizations.
+  </Step>
+
+  <Step title="Maintain Effective Batch Size">
+    Adjust gradient accumulation to compensate.
+  </Step>
+
+  <Step title="Monitor Memory Usage">
+    Use `print_gpu_memory()` to track allocation.
+  </Step>
+
+  <Step title="Enable All Optimizations">
+    - Mixed precision (enabled by default)
+    - Layer freezing (V-JEPA2)
+    - Memory cleanup (automatic)
+  </Step>
+</Steps>
+
+## Memory Optimization Checklist
+
+- [ ] Set appropriate batch size for your GPU
+- [ ] Verify gradient accumulation maintains effective batch size
+- [ ] Enable mixed precision training (default: enabled)
+- [ ] Use layer freezing for V-JEPA2 (default: 0.85)
+- [ ] Monitor memory with `nvidia-smi`
+- [ ] Regular cleanup with `ultra_memory_cleanup()`
+- [ ] Close other GPU processes
+- [ ] Use persistent workers for data loading
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Training Guide" icon="dumbbell" href="/guides/training">
+    Apply optimizations to training
+  </Card>
+  <Card title="Custom Datasets" icon="database" href="/guides/custom-datasets">
+    Prepare data for efficient loading
+  </Card>
+</CardGroup>

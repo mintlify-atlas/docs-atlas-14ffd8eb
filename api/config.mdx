@@ -1,0 +1,522 @@
+---
+title: 'Configuration'
+description: 'Complete configuration reference for QualiVision models and training parameters'
+---
+
+QualiVision uses a centralized configuration system defined in `src/config/config.py`. This page documents all available configuration dictionaries and their parameters.
+
+## Model Configurations
+
+<Tabs>
+  <Tab title="DOVER">
+    Configuration for the DOVER++ model.
+
+    ```python
+    from src.config.config import DOVER_CONFIG
+    
+    # Access configuration
+    model_name = DOVER_CONFIG["model_name"]
+    video_res = DOVER_CONFIG["video_resolution"]
+    ```
+
+    ### Parameters
+
+    <ParamField path="model_name" type="string" default="DOVER++">
+      Name of the DOVER model variant
+    </ParamField>
+
+    <ParamField path="video_resolution" type="tuple[int, int]" default="(640, 640)">
+      Input video resolution as (width, height) in pixels
+    </ParamField>
+
+    <ParamField path="num_frames" type="int" default="64">
+      Number of frames to sample from each video
+    </ParamField>
+
+    <ParamField path="text_encoder" type="string" default="BAAI/bge-large-en-v1.5">
+      HuggingFace model identifier for the text encoder
+    </ParamField>
+
+    <ParamField path="dover_dim" type="int" default="1024">
+      Dimensionality of DOVER feature embeddings
+    </ParamField>
+
+    <ParamField path="text_dim" type="int" default="1024">
+      Dimensionality of text embeddings
+    </ParamField>
+
+    <ParamField path="hidden_dim" type="int" default="512">
+      Hidden layer dimensionality for fusion layers
+    </ParamField>
+
+    <ParamField path="pretrained_weights" type="string" default="https://huggingface.co/teowu/DOVER/resolve/main/DOVER_plus_plus.pth">
+      URL to download pretrained DOVER++ weights
+    </ParamField>
+
+    <ParamField path="batch_size" type="int" default="4">
+      Number of videos per batch during training
+    </ParamField>
+
+    <ParamField path="learning_rate" type="float" default="1e-4">
+      Initial learning rate for optimization
+    </ParamField>
+
+    <ParamField path="epochs" type="int" default="5">
+      Total number of training epochs
+    </ParamField>
+
+    <ParamField path="gradient_accumulation_steps" type="int" default="8">
+      Number of steps to accumulate gradients before updating weights
+    </ParamField>
+
+    <ParamField path="effective_batch_size" type="int" default="32">
+      Effective batch size (batch_size × gradient_accumulation_steps)
+    </ParamField>
+  </Tab>
+
+  <Tab title="V-JEPA">
+    Configuration for the V-JEPA2 model with discriminative learning rates.
+
+    ```python
+    from src.config.config import VJEPA_CONFIG
+    
+    # Access configuration
+    model_name = VJEPA_CONFIG["model_name"]
+    freeze_ratio = VJEPA_CONFIG["freeze_ratio"]
+    discriminative_lr = VJEPA_CONFIG["discriminative_lr"]
+    ```
+
+    ### Parameters
+
+    <ParamField path="model_name" type="string" default="V-JEPA2">
+      Name of the V-JEPA model variant
+    </ParamField>
+
+    <ParamField path="video_resolution" type="tuple[int, int]" default="(384, 384)">
+      Input video resolution as (width, height) in pixels
+    </ParamField>
+
+    <ParamField path="num_frames" type="int" default="64">
+      Number of frames to sample from each video
+    </ParamField>
+
+    <ParamField path="text_encoder" type="string" default="BAAI/bge-large-en-v1.5">
+      HuggingFace model identifier for the text encoder
+    </ParamField>
+
+    <ParamField path="video_encoder" type="string" default="facebook/vjepa-vit-giant-p16">
+      HuggingFace model identifier for the V-JEPA video encoder
+    </ParamField>
+
+    <ParamField path="freeze_ratio" type="float" default="0.85">
+      Proportion of bottom layers to freeze (0.85 = freeze bottom 85% of layers)
+    </ParamField>
+
+    <ParamField path="video_dim" type="int" default="1408">
+      Dimensionality of V-JEPA video embeddings
+    </ParamField>
+
+    <ParamField path="text_dim" type="int" default="768">
+      Dimensionality of text embeddings
+    </ParamField>
+
+    <ParamField path="hidden_dim" type="int" default="512">
+      Hidden layer dimensionality for fusion layers
+    </ParamField>
+
+    <ParamField path="batch_size" type="int" default="6">
+      Number of videos per batch during training
+    </ParamField>
+
+    <ParamField path="learning_rate" type="float" default="2e-4">
+      Base learning rate for optimization
+    </ParamField>
+
+    <ParamField path="epochs" type="int" default="10">
+      Total number of training epochs
+    </ParamField>
+
+    <ParamField path="gradient_accumulation_steps" type="int" default="32">
+      Number of steps to accumulate gradients before updating weights
+    </ParamField>
+
+    <ParamField path="effective_batch_size" type="int" default="192">
+      Effective batch size (batch_size × gradient_accumulation_steps)
+    </ParamField>
+
+    <ParamField path="discriminative_lr" type="dict" default='{"text": 0.1, "video": 0.5, "head": 2.0}'>
+      Learning rate multipliers for different model components:
+      - `text`: 0.1 (10% of base LR for text encoder)
+      - `video`: 0.5 (50% of base LR for video encoder)
+      - `head`: 2.0 (200% of base LR for prediction head)
+    </ParamField>
+  </Tab>
+</Tabs>
+
+## Training Configuration
+
+Global training parameters that apply to all models.
+
+```python
+from src.config.config import TRAINING_CONFIG
+
+# Example: Configure training
+device = TRAINING_CONFIG["device"]
+mixed_precision = TRAINING_CONFIG["mixed_precision"]
+```
+
+<ParamField path="device" type="string" default="cuda">
+  Device to use for training ('cuda' or 'cpu')
+</ParamField>
+
+<ParamField path="mixed_precision" type="bool" default="True">
+  Enable automatic mixed precision (AMP) training for faster computation
+</ParamField>
+
+<ParamField path="gradient_clipping" type="float" default="1.0">
+  Maximum gradient norm for gradient clipping
+</ParamField>
+
+<ParamField path="warmup_steps" type="int" default="100">
+  Number of warmup steps for learning rate scheduler
+</ParamField>
+
+<ParamField path="logging_steps" type="int" default="50">
+  Log training metrics every N steps
+</ParamField>
+
+<ParamField path="save_steps" type="int" default="500">
+  Save model checkpoint every N steps
+</ParamField>
+
+<ParamField path="eval_steps" type="int" default="500">
+  Run evaluation every N steps
+</ParamField>
+
+<ParamField path="max_grad_norm" type="float" default="1.0">
+  Maximum gradient norm for clipping (same as gradient_clipping)
+</ParamField>
+
+<ParamField path="weight_decay" type="float" default="1e-2">
+  Weight decay (L2 regularization) coefficient
+</ParamField>
+
+<ParamField path="adam_epsilon" type="float" default="1e-8">
+  Epsilon parameter for Adam optimizer
+</ParamField>
+
+<ParamField path="adam_betas" type="tuple[float, float]" default="(0.9, 0.999)">
+  Beta parameters for Adam optimizer (beta1, beta2)
+</ParamField>
+
+<ParamField path="scheduler" type="string" default="cosine">
+  Learning rate scheduler type ('cosine', 'linear', etc.)
+</ParamField>
+
+<ParamField path="num_workers" type="int" default="4">
+  Number of worker processes for data loading
+</ParamField>
+
+<ParamField path="pin_memory" type="bool" default="True">
+  Pin memory in DataLoader for faster CPU-to-GPU transfer
+</ParamField>
+
+<ParamField path="persistent_workers" type="bool" default="True">
+  Keep worker processes alive between epochs
+</ParamField>
+
+## Loss Configuration
+
+Configuration for the custom loss function combining smooth L1, ranking, and scale-aware components.
+
+```python
+from src.config.config import LOSS_CONFIG
+
+# Example: Configure loss weights
+loss_weights = LOSS_CONFIG["loss_weights"]
+alpha = loss_weights["alpha"]  # 0.7
+beta = loss_weights["beta"]    # 0.3
+gamma = loss_weights["gamma"]  # 0.1
+```
+
+<ParamField path="smooth_l1_beta" type="float" default="0.1">
+  Beta parameter for smooth L1 loss (transition point between L1 and L2)
+</ParamField>
+
+<ParamField path="ranking_margin" type="float" default="0.2">
+  Margin for pairwise ranking loss
+</ParamField>
+
+<ParamField path="scale_weights" type="dict" default='{"low_quality": 1.5, "high_quality": 1.5, "normal": 1.0}'>
+  Weights for different quality ranges:
+  - `low_quality`: 1.5 (for MOS < 2.5)
+  - `high_quality`: 1.5 (for MOS > 4.0)
+  - `normal`: 1.0 (for 2.5 ≤ MOS ≤ 4.0)
+</ParamField>
+
+<ParamField path="loss_weights" type="dict" default='{"alpha": 0.7, "beta": 0.3, "gamma": 0.1}'>
+  Weights for combining different loss components:
+  - `alpha`: 0.7 (smooth L1 loss weight)
+  - `beta`: 0.3 (ranking loss weight)
+  - `gamma`: 0.1 (scale-aware weight)
+</ParamField>
+
+<ParamField path="adaptive_weighting" type="bool" default="True">
+  Enable adaptive loss weighting during training
+</ParamField>
+
+<ParamField path="adaptation_rate" type="float" default="0.1">
+  Rate at which loss weights adapt (only used if adaptive_weighting is True)
+</ParamField>
+
+## Dataset Configuration
+
+Configuration for dataset loading and preprocessing.
+
+```python
+from src.config.config import DATASET_CONFIG
+
+# Example: Access dataset columns
+mos_columns = DATASET_CONFIG["mos_columns"]
+text_column = DATASET_CONFIG["text_column"]
+video_column = DATASET_CONFIG["video_column"]
+```
+
+<ParamField path="mos_columns" type="list[str]" default='["Traditional_MOS", "Alignment_MOS", "Aesthetic_MOS", "Temporal_MOS", "Overall_MOS"]'>
+  List of MOS (Mean Opinion Score) column names in the dataset
+</ParamField>
+
+<ParamField path="text_column" type="string" default="Prompt">
+  Name of the column containing text prompts
+</ParamField>
+
+<ParamField path="video_column" type="string" default="video_name">
+  Name of the column containing video file names
+</ParamField>
+
+<ParamField path="train_split" type="float" default="0.8">
+  Proportion of data to use for training (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="val_split" type="float" default="0.2">
+  Proportion of data to use for validation (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="seed" type="int" default="42">
+  Random seed for reproducible train/val splits
+</ParamField>
+
+<ParamField path="max_text_length" type="int" default="512">
+  Maximum length of text prompts in tokens
+</ParamField>
+
+<ParamField path="video_extensions" type="list[str]" default='[".mp4", ".avi", ".mov", ".mkv"]'>
+  Supported video file extensions
+</ParamField>
+
+## Evaluation Configuration
+
+Configuration for model evaluation and inference.
+
+```python
+from src.config.config import EVAL_CONFIG
+
+# Example: Run evaluation
+metrics = EVAL_CONFIG["metrics"]
+batch_size = EVAL_CONFIG["batch_size"]
+```
+
+<ParamField path="metrics" type="list[str]" default='["spearman", "pearson"]'>
+  Correlation metrics to compute during evaluation
+</ParamField>
+
+<ParamField path="batch_size" type="int" default="1">
+  Batch size for evaluation (typically 1 for video quality assessment)
+</ParamField>
+
+<ParamField path="num_workers" type="int" default="0">
+  Number of worker processes for evaluation data loading
+</ParamField>
+
+<ParamField path="save_predictions" type="bool" default="True">
+  Save prediction results to file
+</ParamField>
+
+<ParamField path="output_format" type="list[str]" default='["csv", "xlsx"]'>
+  Output formats for saving predictions
+</ParamField>
+
+<ParamField path="generate_report" type="bool" default="True">
+  Generate a detailed evaluation report
+</ParamField>
+
+## GPU Configuration
+
+Configuration for GPU memory management and optimization.
+
+```python
+from src.config.config import GPU_CONFIG
+
+# Example: Configure GPU settings
+memory_fraction = GPU_CONFIG["memory_fraction"]
+mixed_precision = GPU_CONFIG["mixed_precision"]
+```
+
+<ParamField path="memory_fraction" type="float" default="0.9">
+  Fraction of GPU memory to allocate (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="allow_growth" type="bool" default="True">
+  Allow GPU memory to grow dynamically as needed
+</ParamField>
+
+<ParamField path="mixed_precision" type="bool" default="True">
+  Enable mixed precision (FP16/FP32) for faster computation
+</ParamField>
+
+<ParamField path="gradient_checkpointing" type="bool" default="False">
+  Enable gradient checkpointing to save memory (disabled for V-JEPA2)
+</ParamField>
+
+<ParamField path="dataloader_pin_memory" type="bool" default="True">
+  Pin memory in DataLoader for faster data transfer
+</ParamField>
+
+<ParamField path="cleanup_frequency" type="int" default="50">
+  Clean GPU memory cache every N batches
+</ParamField>
+
+## Usage Examples
+
+### Basic Configuration Access
+
+```python
+from src.config.config import (
+    DOVER_CONFIG,
+    VJEPA_CONFIG,
+    TRAINING_CONFIG,
+    LOSS_CONFIG,
+    DATASET_CONFIG,
+    EVAL_CONFIG,
+    GPU_CONFIG
+)
+
+# Access DOVER configuration
+model_name = DOVER_CONFIG["model_name"]
+video_resolution = DOVER_CONFIG["video_resolution"]
+batch_size = DOVER_CONFIG["batch_size"]
+
+# Access training configuration
+device = TRAINING_CONFIG["device"]
+learning_rate = TRAINING_CONFIG["learning_rate"]
+num_workers = TRAINING_CONFIG["num_workers"]
+```
+
+### Custom Configuration Override
+
+```python
+import copy
+from src.config.config import VJEPA_CONFIG, TRAINING_CONFIG
+
+# Create a custom configuration
+custom_config = copy.deepcopy(VJEPA_CONFIG)
+custom_config["batch_size"] = 8
+custom_config["learning_rate"] = 1e-4
+custom_config["epochs"] = 20
+
+# Override training settings
+custom_training = copy.deepcopy(TRAINING_CONFIG)
+custom_training["gradient_clipping"] = 0.5
+custom_training["warmup_steps"] = 200
+```
+
+### Using Discriminative Learning Rates
+
+```python
+from src.config.config import VJEPA_CONFIG
+
+# Get discriminative learning rate multipliers
+base_lr = VJEPA_CONFIG["learning_rate"]  # 2e-4
+discriminative_lr = VJEPA_CONFIG["discriminative_lr"]
+
+# Calculate actual learning rates for each component
+text_lr = base_lr * discriminative_lr["text"]    # 2e-5 (10%)
+video_lr = base_lr * discriminative_lr["video"]  # 1e-4 (50%)
+head_lr = base_lr * discriminative_lr["head"]    # 4e-4 (200%)
+
+print(f"Text encoder LR: {text_lr}")
+print(f"Video encoder LR: {video_lr}")
+print(f"Prediction head LR: {head_lr}")
+```
+
+### Configuring Loss Function
+
+```python
+from src.config.config import LOSS_CONFIG
+
+# Extract loss configuration
+smooth_l1_beta = LOSS_CONFIG["smooth_l1_beta"]
+ranking_margin = LOSS_CONFIG["ranking_margin"]
+scale_weights = LOSS_CONFIG["scale_weights"]
+loss_weights = LOSS_CONFIG["loss_weights"]
+
+# Use in loss computation
+alpha = loss_weights["alpha"]  # 0.7 for smooth L1
+beta = loss_weights["beta"]    # 0.3 for ranking
+gamma = loss_weights["gamma"]  # 0.1 for scale-aware
+
+total_loss = (
+    alpha * smooth_l1_loss +
+    beta * ranking_loss +
+    gamma * scale_aware_loss
+)
+```
+
+### Dataset Configuration
+
+```python
+from src.config.config import DATASET_CONFIG
+
+# Load dataset configuration
+mos_columns = DATASET_CONFIG["mos_columns"]
+text_column = DATASET_CONFIG["text_column"]
+video_column = DATASET_CONFIG["video_column"]
+train_split = DATASET_CONFIG["train_split"]
+seed = DATASET_CONFIG["seed"]
+
+# Use in dataset loading
+import pandas as pd
+
+df = pd.read_csv("data/annotations.csv")
+text_prompts = df[text_column]
+video_files = df[video_column]
+mos_scores = df[mos_columns]
+```
+
+## Path Constants
+
+In addition to configuration dictionaries, the config module also defines useful path constants:
+
+```python
+from src.config.config import (
+    PROJECT_ROOT,
+    DATA_DIR,
+    MODELS_DIR,
+    NOTEBOOKS_DIR,
+    DOCS_DIR,
+    TRAIN_DATA_PATH,
+    VAL_DATA_PATH,
+    TEST_DATA_PATH
+)
+
+# Example usage
+print(f"Project root: {PROJECT_ROOT}")
+print(f"Training data: {TRAIN_DATA_PATH}")
+print(f"Models directory: {MODELS_DIR}")
+```
+
+## See Also
+
+- [Models API](/api/models) - Model architectures using these configurations
+- [Training API](/api/training) - Training functions that consume these settings
+- [Quick Start](/quickstart) - Getting started with default configurations

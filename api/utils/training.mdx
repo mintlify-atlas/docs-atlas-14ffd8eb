@@ -1,0 +1,328 @@
+---
+title: 'Training Utilities'
+description: 'Training functions, loss functions, and optimization utilities for QualiVision'
+---
+
+## HybridLossFunction
+
+Hybrid loss function combining multiple loss components for robust MOS prediction.
+
+**Components:**
+- Smooth L1 loss for basic regression
+- Ranking loss for preserving relative order
+- Scale-aware loss for emphasizing extreme quality values
+
+```python
+from qualivision.utils.training import HybridLossFunction
+
+loss_fn = HybridLossFunction(
+    smooth_l1_beta=0.1,
+    ranking_margin=0.2,
+    use_adaptive_weighting=True
+)
+
+loss, loss_components = loss_fn(predictions, targets, epoch=0)
+```
+
+### Parameters
+
+<ParamField path="smooth_l1_beta" type="float" default="0.1">
+  Beta parameter for smooth L1 loss
+</ParamField>
+
+<ParamField path="ranking_margin" type="float" default="0.2">
+  Margin for ranking loss
+</ParamField>
+
+<ParamField path="scale_weights" type="Dict[str, float]" default="None">
+  Weights for different quality ranges. Default: `{'low_quality': 1.5, 'high_quality': 1.5, 'normal': 1.0}`
+</ParamField>
+
+<ParamField path="use_adaptive_weighting" type="bool" default="True">
+  Whether to use adaptive loss weighting that adjusts during training
+</ParamField>
+
+### Methods
+
+#### \_\_call\_\_(pred, target, epoch=0)
+
+Compute hybrid loss.
+
+**Parameters:**
+- `pred` (torch.Tensor): Predicted MOS scores with shape (B, 5)
+- `target` (torch.Tensor): Target MOS scores with shape (B, 5)
+- `epoch` (int): Current training epoch (default: 0)
+
+**Returns:** `Tuple[torch.Tensor, Dict[str, float]]` containing:
+- `total_loss` (torch.Tensor): Combined loss value
+- `loss_components` (dict): Dictionary with:
+  - `total_loss` (float): Total loss value
+  - `smooth_l1_loss` (float): Smooth L1 component
+  - `ranking_loss` (float): Ranking component
+  - `scale_loss` (float): Scale-aware component
+  - `alpha` (float): Weight for smooth L1 loss
+  - `beta` (float): Weight for ranking loss
+  - `gamma` (float): Weight for scale loss
+
+---
+
+## train_epoch
+
+Train model for one epoch with gradient accumulation and mixed precision.
+
+```python
+from qualivision.utils.training import train_epoch
+
+metrics = train_epoch(
+    model=model,
+    train_loader=train_loader,
+    optimizer=optimizer,
+    scheduler=scheduler,
+    scaler=scaler,
+    loss_fn=loss_fn,
+    accumulation_steps=8,
+    epoch=0
+)
+```
+
+### Parameters
+
+<ParamField path="model" type="nn.Module" required>
+  Model to train
+</ParamField>
+
+<ParamField path="train_loader" type="DataLoader" required>
+  Training data loader
+</ParamField>
+
+<ParamField path="optimizer" type="torch.optim.Optimizer" required>
+  Optimizer for training
+</ParamField>
+
+<ParamField path="scheduler" type="_LRScheduler" default="None">
+  Learning rate scheduler (optional)
+</ParamField>
+
+<ParamField path="scaler" type="GradScaler" required>
+  Gradient scaler for mixed precision training
+</ParamField>
+
+<ParamField path="loss_fn" type="HybridLossFunction" required>
+  Loss function
+</ParamField>
+
+<ParamField path="accumulation_steps" type="int" default="8">
+  Number of gradient accumulation steps
+</ParamField>
+
+<ParamField path="epoch" type="int" default="0">
+  Current epoch number
+</ParamField>
+
+<ParamField path="device" type="str" default="'cuda'">
+  Device to use for training
+</ParamField>
+
+<ParamField path="max_grad_norm" type="float" default="1.0">
+  Maximum gradient norm for clipping
+</ParamField>
+
+<ParamField path="log_interval" type="int" default="50">
+  Logging interval in batches
+</ParamField>
+
+### Returns
+
+<ResponseField name="metrics" type="Dict[str, float]">
+  Dictionary containing:
+  - `train_loss` (float): Average total loss
+  - `train_smooth_l1` (float): Average smooth L1 loss
+  - `train_ranking` (float): Average ranking loss
+  - `train_scale` (float): Average scale loss
+  - `num_batches` (int): Number of batches processed
+</ResponseField>
+
+---
+
+## evaluate
+
+Evaluate model on validation set.
+
+```python
+from qualivision.utils.training import evaluate
+
+metrics, predictions, targets = evaluate(
+    model=model,
+    val_loader=val_loader,
+    loss_fn=loss_fn,
+    device='cuda'
+)
+```
+
+### Parameters
+
+<ParamField path="model" type="nn.Module" required>
+  Model to evaluate
+</ParamField>
+
+<ParamField path="val_loader" type="DataLoader" required>
+  Validation data loader
+</ParamField>
+
+<ParamField path="loss_fn" type="HybridLossFunction" required>
+  Loss function
+</ParamField>
+
+<ParamField path="device" type="str" default="'cuda'">
+  Device to use for evaluation
+</ParamField>
+
+### Returns
+
+<ResponseField name="metrics" type="Dict[str, float]">
+  Dictionary containing:
+  - `val_loss` (float): Average validation loss
+  - `val_smooth_l1` (float): Average smooth L1 loss
+  - `val_ranking` (float): Average ranking loss
+  - `val_scale` (float): Average scale loss
+  - `num_val_batches` (int): Number of batches processed
+</ResponseField>
+
+<ResponseField name="predictions" type="List[float]">
+  List of predicted overall MOS scores
+</ResponseField>
+
+<ResponseField name="targets" type="List[float]">
+  List of target overall MOS scores
+</ResponseField>
+
+---
+
+## create_optimizer
+
+Create optimizer with optional discriminative learning rates.
+
+```python
+from qualivision.utils.training import create_optimizer
+
+optimizer = create_optimizer(
+    model=model,
+    learning_rate=1e-4,
+    weight_decay=1e-2,
+    discriminative_lr={'text': 0.5, 'video': 0.1, 'head': 1.0}
+)
+```
+
+### Parameters
+
+<ParamField path="model" type="nn.Module" required>
+  Model to optimize
+</ParamField>
+
+<ParamField path="learning_rate" type="float" default="1e-4">
+  Base learning rate
+</ParamField>
+
+<ParamField path="weight_decay" type="float" default="1e-2">
+  Weight decay for regularization
+</ParamField>
+
+<ParamField path="discriminative_lr" type="Dict[str, float]" default="None">
+  Dictionary with component-specific LR multipliers. Keys: 'text', 'video', 'head'
+</ParamField>
+
+### Returns
+
+<ResponseField name="optimizer" type="torch.optim.AdamW">
+  Configured AdamW optimizer
+</ResponseField>
+
+---
+
+## create_scheduler
+
+Create learning rate scheduler.
+
+```python
+from qualivision.utils.training import create_scheduler
+
+scheduler = create_scheduler(
+    optimizer=optimizer,
+    num_training_steps=1000,
+    warmup_steps=100,
+    scheduler_type='cosine'
+)
+```
+
+### Parameters
+
+<ParamField path="optimizer" type="torch.optim.Optimizer" required>
+  Optimizer to schedule
+</ParamField>
+
+<ParamField path="num_training_steps" type="int" required>
+  Total number of training steps
+</ParamField>
+
+<ParamField path="warmup_steps" type="int" default="100">
+  Number of warmup steps
+</ParamField>
+
+<ParamField path="scheduler_type" type="str" default="'cosine'">
+  Type of scheduler: 'cosine', 'linear', or 'constant'
+</ParamField>
+
+### Returns
+
+<ResponseField name="scheduler" type="_LRScheduler">
+  Configured learning rate scheduler
+</ResponseField>
+
+---
+
+## AdaptiveLossManager
+
+Adaptive loss weight manager that dynamically adjusts loss component weights during training.
+
+```python
+from qualivision.utils.training import AdaptiveLossManager
+
+loss_manager = AdaptiveLossManager(
+    initial_alpha=0.7,
+    initial_beta=0.3,
+    adaptation_rate=0.1
+)
+
+loss_manager.update_weights(mae_loss=0.5, ranking_loss=0.3)
+alpha, beta = loss_manager.get_weights()
+```
+
+### Parameters
+
+<ParamField path="initial_alpha" type="float" default="0.7">
+  Initial weight for smooth L1 loss
+</ParamField>
+
+<ParamField path="initial_beta" type="float" default="0.3">
+  Initial weight for ranking loss
+</ParamField>
+
+<ParamField path="adaptation_rate" type="float" default="0.1">
+  Rate of adaptation for weight updates
+</ParamField>
+
+### Methods
+
+#### update_weights(mae_loss, ranking_loss)
+
+Update loss weights based on recent loss trends.
+
+**Parameters:**
+- `mae_loss` (float): Current MAE loss value
+- `ranking_loss` (float): Current ranking loss value
+
+#### get_weights()
+
+Get current loss weights.
+
+**Returns:** `Tuple[float, float]` - Current (alpha, beta) weights

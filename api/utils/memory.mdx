@@ -1,0 +1,209 @@
+---
+title: 'Memory Utilities'
+description: 'GPU memory management and optimization utilities for QualiVision'
+---
+
+## ultra_memory_cleanup
+
+Aggressive GPU memory cleanup function.
+
+Performs garbage collection, clears CUDA cache, and synchronizes GPU operations to free up memory.
+
+```python
+from qualivision.utils.memory import ultra_memory_cleanup
+
+# Clean up GPU memory
+ultra_memory_cleanup()
+```
+
+### Usage
+
+Call this function:
+- After processing large batches
+- When encountering OOM errors
+- Between training epochs
+- Before loading large models
+
+---
+
+## get_gpu_memory_info
+
+Get current GPU memory usage information.
+
+```python
+from qualivision.utils.memory import get_gpu_memory_info
+
+info = get_gpu_memory_info()
+print(f"Allocated: {info['allocated_gb']:.1f}GB")
+print(f"Free: {info['free_gb']:.1f}GB")
+```
+
+### Returns
+
+<ResponseField name="allocated_gb" type="float">
+  Currently allocated GPU memory in gigabytes
+</ResponseField>
+
+<ResponseField name="reserved_gb" type="float">
+  Reserved GPU memory by PyTorch in gigabytes
+</ResponseField>
+
+<ResponseField name="max_allocated_gb" type="float">
+  Maximum allocated GPU memory since start in gigabytes
+</ResponseField>
+
+<ResponseField name="max_reserved_gb" type="float">
+  Maximum reserved GPU memory since start in gigabytes
+</ResponseField>
+
+<ResponseField name="free_gb" type="float">
+  Available free GPU memory in gigabytes
+</ResponseField>
+
+### Error Handling
+
+If CUDA is not available, returns:
+```python
+{'error': 'CUDA not available'}
+```
+
+---
+
+## print_gpu_memory
+
+Print current GPU memory usage in a formatted way.
+
+```python
+from qualivision.utils.memory import print_gpu_memory
+
+print_gpu_memory()
+# Output: GPU Memory - Allocated: 3.2GB, Free: 20.8GB, Max Used: 5.1GB
+```
+
+### Example Output
+
+```
+GPU Memory - Allocated: 3.2GB, Free: 20.8GB, Max Used: 5.1GB
+```
+
+---
+
+## MemoryMonitor
+
+Context manager for monitoring memory usage during operations.
+
+```python
+from qualivision.utils.memory import MemoryMonitor
+
+with MemoryMonitor("Model Forward Pass"):
+    outputs = model(inputs)
+
+# Output: Model Forward Pass - Memory change: Allocated: +2.34GB, Reserved: +2.50GB
+```
+
+### Parameters
+
+<ParamField path="name" type="str" default="'Operation'">
+  Name of the operation being monitored
+</ParamField>
+
+### Usage
+
+Use as a context manager to track memory changes:
+
+```python
+with MemoryMonitor("Data Loading"):
+    batch = next(iter(dataloader))
+
+with MemoryMonitor("Training Step"):
+    loss = train_step(model, batch)
+    loss.backward()
+```
+
+### Example Output
+
+```
+Data Loading - Memory change: Allocated: +1.50GB, Reserved: +1.50GB
+Training Step - Memory change: Allocated: +3.20GB, Reserved: +3.50GB
+```
+
+---
+
+## cleanup_on_oom
+
+Decorator to cleanup memory on OOM and retry once.
+
+```python
+from qualivision.utils.memory import cleanup_on_oom
+
+@cleanup_on_oom
+def process_batch(model, batch):
+    return model(batch)
+
+# If OOM occurs, automatically cleans up and retries
+output = process_batch(model, batch)
+```
+
+### Parameters
+
+<ParamField path="func" type="Callable" required>
+  Function to wrap with OOM handling
+</ParamField>
+
+### Behavior
+
+1. Attempts to execute the function
+2. If OOM error occurs:
+   - Prints warning message
+   - Calls `ultra_memory_cleanup()`
+   - Retries the function once
+3. If other RuntimeError occurs, raises it
+
+### Example
+
+```python
+@cleanup_on_oom
+def train_step(model, batch, optimizer):
+    outputs = model(batch)
+    loss = criterion(outputs, batch['labels'])
+    loss.backward()
+    optimizer.step()
+    return loss
+
+# Automatically handles OOM errors
+loss = train_step(model, batch, optimizer)
+```
+
+---
+
+## Best Practices
+
+### Memory Management Tips
+
+1. **Regular Cleanup**: Call `ultra_memory_cleanup()` every few batches
+   ```python
+   for i, batch in enumerate(dataloader):
+       process_batch(batch)
+       if i % 10 == 0:
+           ultra_memory_cleanup()
+   ```
+
+2. **Monitor Memory**: Use `MemoryMonitor` to identify memory-intensive operations
+   ```python
+   with MemoryMonitor("Video Encoding"):
+       features = encoder(video)
+   ```
+
+3. **OOM Protection**: Use `@cleanup_on_oom` decorator for critical functions
+   ```python
+   @cleanup_on_oom
+   def forward_pass(model, batch):
+       return model(batch)
+   ```
+
+4. **Check Before Loading**: Verify available memory before loading large models
+   ```python
+   info = get_gpu_memory_info()
+   if info['free_gb'] < 5.0:
+       ultra_memory_cleanup()
+   ```

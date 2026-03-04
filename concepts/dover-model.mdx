@@ -1,0 +1,399 @@
+---
+title: 'DOVER++ Model'
+description: 'Deep dive into the DOVER++ architecture with quality-aware fusion'
+icon: 'brain'
+---
+
+## Overview
+
+DOVER++ (Disentangled Objective Video Quality Evaluator) is a state-of-the-art video quality assessment model that separates aesthetic and technical quality dimensions. QualiVision extends DOVER++ with quality-aware fusion mechanisms for multi-modal understanding.
+
+<Info>
+**DOVER++ Key Stats**
+- **Parameters**: ~120 million
+- **Input Resolution**: 640×640
+- **Frames**: 64 per video
+- **Memory**: ~12GB GPU
+- **Pretrained**: HuggingFace weights available
+</Info>
+
+## Architecture Components
+
+### 1. ConvNeXt 3D Backbone
+
+The backbone uses a modern ConvNeXt architecture adapted for 3D video processing:
+
+<Tabs>
+  <Tab title="Overall Structure">
+    From `dover_model.py:128-152`, the backbone consists of 4 stages:
+    
+    ```python
+    def _build_convnext_backbone(self) -> nn.Module:
+        return nn.Sequential(
+            # Stem: 3 -> 96 channels
+            nn.Conv3d(3, 96, kernel_size=(1, 4, 4), stride=(1, 4, 4)),
+            nn.GroupNorm(1, 96),
+            
+            # Stage 1: 96 channels, 3 blocks
+            *[self._make_convnext_block(96) for _ in range(3)],
+            nn.Conv3d(96, 192, kernel_size=(1, 2, 2), stride=(1, 2, 2)),
+            
+            # Stage 2: 192 channels, 3 blocks
+            *[self._make_convnext_block(192) for _ in range(3)],
+            nn.Conv3d(192, 384, kernel_size=(1, 2, 2), stride=(1, 2, 2)),
+            
+            # Stage 3: 384 channels, 9 blocks
+            *[self._make_convnext_block(384) for _ in range(9)],
+            nn.Conv3d(384, 768, kernel_size=(1, 2, 2), stride=(1, 2, 2)),
+            
+            # Stage 4: 768 channels, 3 blocks
+            *[self._make_convnext_block(768) for _ in range(3)],
+        )
+    ```
+    
+    **Design Highlights**:
+    - Progressive channel expansion: 96 → 192 → 384 → 768
+    - Spatial downsampling with (1, 2, 2) convolutions (preserves temporal)
+    - 18 total ConvNeXt blocks with varying depths per stage
+  </Tab>
+  
+  <Tab title="ConvNeXt Block">
+    Each ConvNeXt block implements the modern architecture pattern:
+    
+    From `dover_model.py:154-162`:
+    ```python
+    def _make_convnext_block(self, dim: int) -> nn.Module:
+        return nn.Sequential(
+            nn.Conv3d(dim, dim, kernel_size=7, padding=3, groups=dim),  # Depthwise
+            nn.GroupNorm(1, dim),
+            nn.Conv3d(dim, dim * 4, kernel_size=1),  # Expand
+            nn.GELU(),
+            nn.Conv3d(dim * 4, dim, kernel_size=1),  # Contract
+        )
+    ```
+    
+    **Key Features**:
+    - **Depthwise convolution**: 7×7×7 kernel for spatial-temporal patterns
+    - **Inverted bottleneck**: Expand to 4× channels, then contract
+    - **GELU activation**: Smooth, modern activation function
+    - **GroupNorm**: Stable normalization for small batch sizes
+  </Tab>
+  
+  <Tab title="Feature Dimensions">
+    Input and output dimensions through the backbone:
+    
+    | Stage | Input Dim | Output Dim | Spatial Size |
+    |-------|-----------|------------|-------------|
+    | Input | (B, 3, 64, 640, 640) | - | - |
+    | Stem | (B, 3, 64, 640, 640) | (B, 96, 64, 160, 160) | ÷4 |
+    | Stage 1 | (B, 96, 64, 160, 160) | (B, 192, 64, 80, 80) | ÷2 |
+    | Stage 2 | (B, 192, 64, 80, 80) | (B, 384, 64, 40, 40) | ÷2 |
+    | Stage 3 | (B, 384, 64, 40, 40) | (B, 768, 64, 20, 20) | ÷2 |
+    | Stage 4 | (B, 768, 64, 20, 20) | (B, 768, 64, 20, 20) | - |
+  </Tab>
+</Tabs>
+
+### 2. Disentangled Quality Heads
+
+DOVER++ separates quality into aesthetic and technical dimensions:
+
+<CardGroup cols={2}>
+  <Card title="Aesthetic Head" icon="palette">
+    Evaluates artistic and visual appeal aspects:
+    - Color harmony
+    - Composition
+    - Visual creativity
+    - Artistic style
+  </Card>
+  
+  <Card title="Technical Head" icon="wrench">
+    Assesses technical quality factors:
+    - Sharpness
+    - Artifacts
+    - Noise levels
+    - Compression quality
+  </Card>
+</CardGroup>
+
+From `dover_model.py:99-116`:
+```python
+# Separate heads for aesthetic and technical quality
+self.aesthetic_head = nn.Sequential(
+    nn.AdaptiveAvgPool3d(1),
+    nn.Flatten(),
+    nn.Linear(768, 256),
+    nn.ReLU(inplace=True),
+    nn.Dropout(0.1),
+    nn.Linear(256, 1)
+)
+
+self.technical_head = nn.Sequential(
+    nn.AdaptiveAvgPool3d(1),
+    nn.Flatten(),
+    nn.Linear(768, 256),
+    nn.ReLU(inplace=True),
+    nn.Dropout(0.1),
+    nn.Linear(256, 1)
+)
+```
+
+### 3. Quality-Aware Fusion Mechanism
+
+The fusion module combines DOVER++ video features with text embeddings using cross-modal attention:
+
+<Steps>
+  <Step title="Quality Aspect Classification">
+    Analyze text prompt to determine which quality aspects are emphasized:
+    
+    From `dover_model.py:211-218`:
+    ```python
+    self.quality_classifier = nn.Sequential(
+        nn.Linear(text_dim, hidden_dim),
+        nn.ReLU(inplace=True),
+        nn.Dropout(0.1),
+        nn.Linear(hidden_dim, 4),  # 4 quality aspects
+        nn.Softmax(dim=-1)
+    )
+    ```
+    
+    Outputs 4 weights for: Traditional, Alignment, Aesthetic, Temporal
+  </Step>
+  
+  <Step title="Feature Projection">
+    Project both modalities to common dimension:
+    
+    ```python
+    self.dover_proj = nn.Linear(dover_dim, hidden_dim)  # 1024 -> 512
+    self.text_proj = nn.Linear(text_dim, hidden_dim)    # 1024 -> 512
+    ```
+  </Step>
+  
+  <Step title="Cross-Modal Attention">
+    From `dover_model.py:220-226`:
+    ```python
+    self.cross_attention = nn.MultiheadAttention(
+        embed_dim=hidden_dim,
+        num_heads=8,
+        dropout=0.1,
+        batch_first=True
+    )
+    ```
+    
+    Text queries attend to video features to extract relevant quality information
+  </Step>
+  
+  <Step title="Feature Fusion">
+    From `dover_model.py:265-277`:
+    ```python
+    # Cross-modal attention
+    attended_dover, _ = self.cross_attention(
+        query=text_proj_seq,
+        key=dover_proj_seq,
+        value=dover_proj_seq
+    )
+    
+    # Concatenate and fuse
+    combined_features = torch.cat([attended_dover, text_proj], dim=-1)
+    fused_features = self.fusion_layer(combined_features)
+    ```
+  </Step>
+</Steps>
+
+<Note>
+**Why Cross-Modal Attention?** Text prompts like "smooth camera motion" or "vibrant colors" guide the model to focus on specific quality aspects. The attention mechanism allows the model to selectively emphasize relevant video features based on the text description.
+</Note>
+
+### 4. MOS Prediction Head
+
+The final prediction head generates 5 MOS scores from fused features:
+
+From `dover_model.py:286-303`:
+```python
+class MOSPredictor(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 256):
+        super().__init__()
+        
+        self.predictor = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(0.15),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Dropout(0.15),
+            nn.Linear(hidden_dim // 2, 5)  # 4 sub-MOS + Overall
+        )
+```
+
+**Output Scores**:
+1. **Traditional MOS**: Overall technical quality
+2. **Alignment MOS**: Text-video correspondence
+3. **Aesthetic MOS**: Visual appeal
+4. **Temporal MOS**: Motion smoothness
+5. **Overall MOS**: Weighted combination
+
+## Forward Pass
+
+The complete forward pass integrates all components:
+
+<Accordion title="View Complete Forward Pass Code">
+From `dover_model.py:372-402`:
+```python
+def forward(self, frames: torch.Tensor, prompts: List[str]) -> torch.Tensor:
+    """
+    Args:
+        frames: Video frames tensor (B, C, T, H, W)
+        prompts: List of text prompts
+        
+    Returns:
+        MOS predictions (B, 5) - [Traditional, Alignment, Aesthetic, Temporal, Overall]
+    """
+    # Extract DOVER++ features
+    dover_output = self.dover_model(frames)
+    dover_features = dover_output['features']  # (B, 1024)
+    
+    # Extract text features
+    with torch.no_grad():
+        text_features = self.text_encoder.encode(
+            prompts,
+            convert_to_tensor=True,
+            normalize_embeddings=True,
+            device=self.device
+        )  # (B, 1024)
+    
+    # Quality-aware fusion
+    fused_features, quality_weights = self.fusion(dover_features, text_features)
+    # fused_features: (B, 256)
+    # quality_weights: (B, 4)
+    
+    # Predict MOS scores
+    mos_predictions = self.mos_predictor(fused_features)  # (B, 5)
+    
+    return mos_predictions
+```
+</Accordion>
+
+## Technical Specifications
+
+<Tabs>
+  <Tab title="Model Specs">
+    | Parameter | Value |
+    |-----------|-------|
+    | Total Parameters | ~120M |
+    | Trainable Parameters | ~120M |
+    | Input Resolution | 640×640 |
+    | Input Frames | 64 |
+    | Backbone Channels | 768 |
+    | Feature Dimension | 1024 |
+    | Hidden Dimension | 512 |
+    | Output Dimension | 5 (MOS scores) |
+  </Tab>
+  
+  <Tab title="Training Config">
+    From `config.py:21-35`:
+    ```python
+    DOVER_CONFIG = {
+        "model_name": "DOVER++",
+        "video_resolution": (640, 640),
+        "num_frames": 64,
+        "text_encoder": "BAAI/bge-large-en-v1.5",
+        "dover_dim": 1024,
+        "text_dim": 1024,
+        "hidden_dim": 512,
+        "batch_size": 4,
+        "learning_rate": 1e-4,
+        "epochs": 5,
+        "gradient_accumulation_steps": 8,
+        "effective_batch_size": 32
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Memory Usage">
+    | Component | Memory |
+    |-----------|--------|
+    | Model Parameters | ~480 MB |
+    | Single Batch (B=4) | ~8 GB |
+    | Gradients | ~480 MB |
+    | Optimizer States (Adam) | ~960 MB |
+    | Activations | ~2 GB |
+    | **Total** | **~12 GB** |
+    
+    <Info>
+    With gradient accumulation (8 steps), effective batch size of 32 can be achieved on a single 12GB GPU.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Pretrained Weights
+
+DOVER++ uses pretrained weights from the original DOVER project:
+
+From `dover_model.py:36-43`:
+```python
+# Download weights if not exists
+if not os.path.exists(weights_path):
+    os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+    print(f"Downloading DOVER++ weights to {weights_path}")
+    urllib.request.urlretrieve(
+        "https://huggingface.co/teowu/DOVER/resolve/main/DOVER_plus_plus.pth",
+        weights_path
+    )
+```
+
+<Warning>
+The pretrained weights are loaded with `strict=False` to allow for architecture modifications in the fusion and prediction heads. Only the ConvNeXt backbone weights are transferred.
+</Warning>
+
+## Feature Extraction API
+
+Extract intermediate features for analysis:
+
+```python
+features = model.extract_features(frames, prompts)
+# Returns:
+# {
+#     'dover_features': (B, 1024),
+#     'text_features': (B, 1024),
+#     'fused_features': (B, 256),
+#     'quality_weights': (B, 4),
+#     'aesthetic_score': (B, 1),
+#     'technical_score': (B, 1)
+# }
+```
+
+## Advantages
+
+<CardGroup cols={2}>
+  <Card title="Disentangled Quality" icon="split">
+    Separates aesthetic and technical aspects for interpretable assessment
+  </Card>
+  
+  <Card title="Cross-Modal Fusion" icon="link">
+    Attention mechanism aligns video features with text guidance
+  </Card>
+  
+  <Card title="Pretrained Backbone" icon="download">
+    Leverages high-quality pretrained weights from DOVER project
+  </Card>
+  
+  <Card title="Quality-Aware" icon="brain">
+    Dynamically weights quality aspects based on text prompt
+  </Card>
+</CardGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="V-JEPA2 Model" icon="microchip" href="/concepts/vjepa-model">
+    Alternative architecture with ViT backbone
+  </Card>
+  
+  <Card title="Quality Dimensions" icon="gauge" href="/concepts/quality-dimensions">
+    Understanding the 4 quality metrics
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Overall system architecture
+  </Card>
+</CardGroup>

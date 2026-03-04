@@ -1,0 +1,264 @@
+---
+title: 'Dataset Utilities'
+description: 'Dataset classes and data loading utilities for QualiVision'
+---
+
+## TaobaoVDDataset
+
+Dataset class for TaobaoVD-GC video quality assessment dataset.
+
+Handles video loading, frame sampling, and preprocessing for both DOVER++ (640x640) and V-JEPA2 (384x384) models.
+
+```python
+from qualivision.utils.dataset import TaobaoVDDataset
+
+dataset = TaobaoVDDataset(
+    csv_file="train.csv",
+    video_dir="/path/to/videos",
+    num_frames=64,
+    resolution=640,
+    mode='train'
+)
+```
+
+### Parameters
+
+<ParamField path="csv_file" type="str" required>
+  Path to CSV file with labels
+</ParamField>
+
+<ParamField path="video_dir" type="str" required>
+  Directory containing video files
+</ParamField>
+
+<ParamField path="num_frames" type="int" default="64">
+  Number of frames to sample from each video
+</ParamField>
+
+<ParamField path="resolution" type="int" default="640">
+  Target resolution for videos (640 for DOVER++, 384 for V-JEPA2)
+</ParamField>
+
+<ParamField path="mode" type="str" default="'train'">
+  Dataset mode: 'train', 'val', or 'test'
+</ParamField>
+
+<ParamField path="video_processor" type="AutoVideoProcessor" default="None">
+  Optional video processor for V-JEPA2 model
+</ParamField>
+
+### Attributes
+
+<ResponseField name="MOS_COLS" type="List[str]">
+  Column names for MOS scores: ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 'Temporal_MOS', 'Overall_MOS']
+</ResponseField>
+
+<ResponseField name="has_labels" type="bool">
+  Whether the dataset contains ground truth labels
+</ResponseField>
+
+### Methods
+
+#### \_\_len\_\_()
+
+Returns the number of samples in the dataset.
+
+**Returns:** `int` - Number of samples
+
+#### \_\_getitem\_\_(idx)
+
+Get a single sample from the dataset.
+
+**Parameters:**
+- `idx` (int): Sample index
+
+**Returns:** `Dict[str, Any]` containing:
+- `frames` (torch.Tensor): Video frames with shape (C, T, H, W)
+- `prompt` (str): Text prompt for the video
+- `video_name` (str): Name of the video file
+- `labels` (torch.Tensor): MOS labels (5,) or zeros for test mode
+
+---
+
+## OptimizedGPUCollate
+
+Optimized collate function for GPU processing with text encoding.
+
+Handles batching of video data and text encoding, optimizing for GPU memory usage and processing speed.
+
+```python
+from qualivision.utils.dataset import OptimizedGPUCollate
+
+collate_fn = OptimizedGPUCollate(
+    text_encoder=text_encoder,
+    device='cuda',
+    max_frames=64
+)
+```
+
+### Parameters
+
+<ParamField path="video_processor" type="AutoVideoProcessor" default="None">
+  Optional video processor for V-JEPA2
+</ParamField>
+
+<ParamField path="text_encoder" type="SentenceTransformer" default="None">
+  Text encoder for prompt processing
+</ParamField>
+
+<ParamField path="device" type="str" default="'cuda'">
+  Device to place tensors on
+</ParamField>
+
+<ParamField path="max_frames" type="int" default="64">
+  Maximum number of frames per video
+</ParamField>
+
+### Methods
+
+#### \_\_call\_\_(batch)
+
+Collate a batch of samples.
+
+**Parameters:**
+- `batch` (List[Dict[str, Any]]): List of samples from dataset
+
+**Returns:** `Dict[str, torch.Tensor]` containing:
+- `pixel_values_videos` (torch.Tensor): Batched video frames (B, C, T, H, W)
+- `text_emb` (torch.Tensor): Text embeddings (B, D)
+- `labels` (torch.Tensor): Batched labels (B, 5)
+- `video_names` (List[str]): List of video names
+- `prompts` (List[str]): List of original prompts
+
+---
+
+## create_data_loaders
+
+Create train and validation data loaders.
+
+```python
+from qualivision.utils.dataset import create_data_loaders
+
+train_loader, val_loader = create_data_loaders(
+    train_csv="train.csv",
+    val_csv="val.csv",
+    train_video_dir="/path/to/train",
+    val_video_dir="/path/to/val",
+    batch_size=4,
+    num_frames=64,
+    text_encoder=text_encoder
+)
+```
+
+### Parameters
+
+<ParamField path="train_csv" type="str" required>
+  Path to training CSV file
+</ParamField>
+
+<ParamField path="val_csv" type="str" required>
+  Path to validation CSV file
+</ParamField>
+
+<ParamField path="train_video_dir" type="str" required>
+  Directory containing training videos
+</ParamField>
+
+<ParamField path="val_video_dir" type="str" required>
+  Directory containing validation videos
+</ParamField>
+
+<ParamField path="batch_size" type="int" default="4">
+  Batch size for data loading
+</ParamField>
+
+<ParamField path="num_frames" type="int" default="64">
+  Number of frames per video
+</ParamField>
+
+<ParamField path="resolution" type="int" default="640">
+  Target resolution for videos
+</ParamField>
+
+<ParamField path="video_processor" type="AutoVideoProcessor" default="None">
+  Optional video processor for V-JEPA2
+</ParamField>
+
+<ParamField path="text_encoder" type="SentenceTransformer" default="None">
+  Optional text encoder for prompt processing
+</ParamField>
+
+<ParamField path="device" type="str" default="'cuda'">
+  Device for processing
+</ParamField>
+
+<ParamField path="num_workers" type="int" default="4">
+  Number of worker processes for data loading
+</ParamField>
+
+### Returns
+
+<ResponseField name="train_loader" type="DataLoader">
+  Training data loader
+</ResponseField>
+
+<ResponseField name="val_loader" type="DataLoader">
+  Validation data loader
+</ResponseField>
+
+---
+
+## create_test_loader
+
+Create test data loader.
+
+```python
+from qualivision.utils.dataset import create_test_loader
+
+test_loader = create_test_loader(
+    test_csv="test.csv",
+    test_video_dir="/path/to/test",
+    batch_size=1,
+    text_encoder=text_encoder
+)
+```
+
+### Parameters
+
+<ParamField path="test_csv" type="str" required>
+  Path to test CSV file
+</ParamField>
+
+<ParamField path="test_video_dir" type="str" required>
+  Directory containing test videos
+</ParamField>
+
+<ParamField path="batch_size" type="int" default="1">
+  Batch size for data loading
+</ParamField>
+
+<ParamField path="num_frames" type="int" default="64">
+  Number of frames per video
+</ParamField>
+
+<ParamField path="resolution" type="int" default="640">
+  Target resolution for videos
+</ParamField>
+
+<ParamField path="video_processor" type="AutoVideoProcessor" default="None">
+  Optional video processor for V-JEPA2
+</ParamField>
+
+<ParamField path="text_encoder" type="SentenceTransformer" default="None">
+  Optional text encoder for prompt processing
+</ParamField>
+
+<ParamField path="device" type="str" default="'cuda'">
+  Device for processing
+</ParamField>
+
+### Returns
+
+<ResponseField name="test_loader" type="DataLoader">
+  Test data loader with num_workers=0
+</ResponseField>

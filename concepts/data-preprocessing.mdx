@@ -1,0 +1,672 @@
+---
+title: 'Data Preprocessing'
+description: 'Comprehensive guide to data preparation pipeline for video quality assessment'
+icon: 'filter'
+---
+
+## Overview
+
+QualiVision implements a sophisticated data preprocessing pipeline that handles video loading, frame sampling, resolution adaptation, text encoding, and MOS score normalization. The pipeline is optimized for GPU acceleration and supports both DOVER++ and V-JEPA2 models.
+
+## Dataset Structure
+
+From `README.md:19-43`, the expected directory structure:
+
+```bash
+data/
+├── train/
+│   ├── labels/
+│   │   └── train_labels.csv
+│   └── videos/
+│       ├── video001.mp4
+│       ├── video002.mp4
+│       └── ...
+├── val/
+│   ├── labels/
+│   │   └── val_labels.csv
+│   └── videos/
+│       ├── val_video001.mp4
+│       └── ...
+└── test/
+    ├── test_labels.csv
+    └── videos/
+        ├── test_video001.mp4
+        └── ...
+```
+
+### CSV Label Format
+
+From `README.md:46-50` and `dataset.py:37`:
+```csv
+video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+video002.mp4,"Sunset over mountains",4.5,4.2,4.8,4.1,4.4
+```
+
+**Required Columns**:
+- `video_name`: Video filename
+- `Prompt`: Text description/prompt
+- `Traditional_MOS`: Technical quality score (1-5)
+- `Alignment_MOS`: Text-video alignment score (1-5)
+- `Aesthetic_MOS`: Aesthetic appeal score (1-5)
+- `Temporal_MOS`: Temporal consistency score (1-5)
+- `Overall_MOS`: Overall quality score (1-5)
+
+## Frame Sampling
+
+All videos are uniformly sampled to **64 frames**:
+
+<Tabs>
+  <Tab title="Uniform Sampling">
+    From `dataset.py:82-98`:
+    ```python
+    def _sample_frames_manual(self, video_path: Path) -> torch.Tensor:
+        vr = VideoReader(str(video_path))
+        total_frames = len(vr)
+        
+        # Sample frames uniformly
+        if total_frames <= self.num_frames:
+            indices = np.linspace(0, total_frames - 1, self.num_frames).astype(int)
+        else:
+            indices = np.linspace(0, total_frames - 1, self.num_frames).astype(int)
+        
+        indices = np.clip(indices, 0, total_frames - 1)
+        frames = vr.get_batch(indices)  # Shape: (T, H, W, C)
+    ```
+    
+    **Process**:
+    1. Count total frames in video
+    2. Generate 64 evenly-spaced indices using `np.linspace`
+    3. Clip indices to valid range [0, total_frames-1]
+    4. Extract frames using Decord's batch API
+  </Tab>
+  
+  <Tab title="Short Videos">
+    **What if video has < 64 frames?**
+    
+    ```python
+    if total_frames <= self.num_frames:
+        indices = np.linspace(0, total_frames - 1, self.num_frames).astype(int)
+    ```
+    
+    - **Behavior**: Frames are repeated to reach 64
+    - **Example**: 30-frame video → indices [0, 1, 2, ..., 29, 29, 29, ...]
+    - **Impact**: Some frames duplicated, but maintains temporal structure
+  </Tab>
+  
+  <Tab title="Long Videos">
+    **What if video has > 64 frames?**
+    
+    ```python
+    else:
+        indices = np.linspace(0, total_frames - 1, self.num_frames).astype(int)
+    ```
+    
+    - **Behavior**: Frames uniformly sampled across entire duration
+    - **Example**: 240-frame video → every ~3.75 frames sampled
+    - **Impact**: Captures full temporal extent without oversampling
+  </Tab>
+  
+  <Tab title="Why 64 Frames?">
+    <Info>
+    **Design Rationale for 64 frames**:
+    
+    - **Temporal coverage**: Captures 2+ seconds at 30fps
+    - **GPU memory**: Fits comfortably in modern GPUs
+    - **Model compatibility**: Both DOVER++ and V-JEPA2 optimized for this
+    - **Pretrained weights**: V-JEPA2 pretrained with 64 frames
+    - **Trade-off**: Balance between temporal context and computational cost
+    </Info>
+    
+    From `config.py:24,40`:
+    ```python
+    DOVER_CONFIG = {"num_frames": 64}
+    VJEPA_CONFIG = {"num_frames": 64}
+    ```
+  </Tab>
+</Tabs>
+
+## Resolution Adaptation
+
+Different models require different input resolutions:
+
+<Tabs>
+  <Tab title="DOVER++ (640×640)">
+    From `dataset.py:64-69` and `config.py:23`:
+    ```python
+    # Transform pipeline
+    self.transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((640, 640)),  # DOVER++ resolution
+        transforms.ToTensor(),  # Converts to [0,1] range
+    ])
+    ```
+    
+    **Process per frame**:
+    1. Convert numpy array → PIL Image
+    2. Resize to 640×640 (bicubic interpolation by default)
+    3. Convert to PyTorch tensor (C, H, W)
+    4. Normalize to [0, 1] range
+    
+    **Final shape**: `(B, C=3, T=64, H=640, W=640)`
+  </Tab>
+  
+  <Tab title="V-JEPA2 (384×384)">
+    From `dataset.py:120-148` and `config.py:39`:
+    ```python
+    def _sample_frames_processor(self, video_path: Path) -> torch.Tensor:
+        # ... frame sampling ...
+        
+        # Process with video processor
+        processed = self.video_processor(
+            list(frames_np),
+            return_tensors="pt"
+        )
+        
+        return processed["pixel_values"][0]  # (C, T, H=384, W=384)
+    ```
+    
+    **AutoVideoProcessor handles**:
+    1. Resize to 384×384
+    2. Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    3. Convert to tensor format expected by ViT
+    
+    **Final shape**: `(B, C=3, T=64, H=384, W=384)`
+  </Tab>
+  
+  <Tab title="Why Different Resolutions?">
+    | Model | Resolution | Rationale |
+    |-------|------------|----------|
+    | DOVER++ | 640×640 | Higher resolution preserves fine-grained quality details (artifacts, sharpness) |
+    | V-JEPA2 | 384×384 | ViT patch size (16×16) divides evenly; pretrained at this resolution |
+    
+    <Note>
+    **Memory Impact**: 
+    - 640×640: ~4× more pixels than 384×384
+    - But DOVER++ is lighter (120M params) so total memory similar
+    - V-JEPA2 compensates with parameter freezing
+    </Note>
+  </Tab>
+</Tabs>
+
+## Text Processing with BGE-Large
+
+Text prompts are encoded to dense embeddings:
+
+<Tabs>
+  <Tab title="Text Encoder">
+    From `config.py:25,41`:
+    ```python
+    DOVER_CONFIG = {"text_encoder": "BAAI/bge-large-en-v1.5"}
+    VJEPA_CONFIG = {"text_encoder": "BAAI/bge-large-en-v1.5"}
+    ```
+    
+    **BGE-Large** (BAAI General Embedding):
+    - **Model**: Sentence Transformer
+    - **Architecture**: BERT-based encoder
+    - **Dimension**: 1024 (DOVER++) or 768 (V-JEPA2)
+    - **Training**: Contrastive learning on text pairs
+  </Tab>
+  
+  <Tab title="Encoding Process">
+    From `dataset.py:258-273`:
+    ```python
+    # Encode text during batching
+    with torch.no_grad():
+        text_emb = self.text_encoder.encode(
+            prompts,
+            convert_to_tensor=True,
+            normalize_embeddings=True,  # L2 normalization
+            device=self.device,
+            batch_size=len(prompts)
+        )
+    ```
+    
+    **Steps**:
+    1. Tokenize text (WordPiece)
+    2. Pass through BERT encoder
+    3. Pool token embeddings (mean pooling)
+    4. L2 normalize to unit sphere
+    5. Move to GPU
+    
+    **Output**: `(B, 1024)` or `(B, 768)` tensor
+  </Tab>
+  
+  <Tab title="Why BGE-Large?">
+    <Info>
+    **Advantages of BGE-Large**:
+    
+    - **State-of-the-art**: Top performance on MTEB benchmark
+    - **Semantic understanding**: Captures nuanced meaning
+    - **Normalized**: Embeddings on unit sphere (cosine similarity)
+    - **English-optimized**: Best for English prompts
+    - **Fast**: Efficient inference with sentence-transformers
+    </Info>
+    
+    **Alternative**: Could use CLIP text encoder, but BGE is optimized for pure text understanding
+  </Tab>
+  
+  <Tab title="Prompt Examples">
+    ```python
+    prompts = [
+        "A cat playing piano",
+        "Sunset over mountains with vibrant colors",
+        "A robot dancing in a futuristic city"
+    ]
+    
+    # Encoded to:
+    text_emb = encode(prompts)  # Shape: (3, 1024)
+    
+    # Each prompt → 1024-dim vector capturing:
+    # - Objects: "cat", "piano", "sunset", "robot"
+    # - Actions: "playing", "dancing"
+    # - Attributes: "vibrant", "futuristic"
+    # - Scene: "mountains", "city"
+    ```
+  </Tab>
+</Tabs>
+
+## MOS Score Normalization
+
+From `dataset.py:182-189`:
+```python
+if self.has_labels:
+    # Training/validation mode - include labels
+    labels = pd.to_numeric(row[self.MOS_COLS], errors="coerce").fillna(3.0).astype(np.float32).values
+    result["labels"] = torch.tensor(labels, dtype=torch.float32)
+else:
+    # Test mode - no labels available
+    result["labels"] = torch.zeros(5, dtype=torch.float32)
+```
+
+<Tabs>
+  <Tab title="Normalization Process">
+    **Steps**:
+    1. **Parse**: Convert CSV strings to numeric values
+    2. **Handle missing**: Fill NaN with 3.0 (neutral score)
+    3. **Cast**: Convert to float32 for GPU efficiency
+    4. **Tensorize**: Create PyTorch tensor
+    
+    **Range**: 1.0 to 5.0 (MOS scale)
+    
+    From `README.md:56`:
+    ```markdown
+    - **Quality Normalization**: MOS scores standardized to 1-5 scale
+    ```
+  </Tab>
+  
+  <Tab title="Missing Values">
+    ```python
+    errors="coerce"  # Invalid values → NaN
+    .fillna(3.0)     # NaN → 3.0 (neutral)
+    ```
+    
+    **Why 3.0?**
+    - Middle of 1-5 range
+    - Neutral quality (neither good nor bad)
+    - Prevents extreme bias from missing data
+    
+    <Warning>
+    If many values are missing, consider:
+    - Dropping samples with missing labels
+    - Using different imputation (mean of dataset)
+    - Flagging samples for review
+    </Warning>
+  </Tab>
+  
+  <Tab title="Test Mode">
+    ```python
+    # Test mode - no labels available
+    result["labels"] = torch.zeros(5, dtype=torch.float32)
+    ```
+    
+    For test sets without ground truth:
+    - Dummy zeros used as placeholders
+    - Loss not computed on test set
+    - Only predictions saved
+  </Tab>
+</Tabs>
+
+## Data Loading Pipeline
+
+### TaobaoVDDataset Class
+
+From `dataset.py:29-190`:
+
+<Accordion title="View Dataset Initialization Code">
+```python
+class TaobaoVDDataset(Dataset):
+    MOS_COLS = ['Traditional_MOS', 'Alignment_MOS', 'Aesthetic_MOS', 'Temporal_MOS', 'Overall_MOS']
+    
+    def __init__(self, 
+                 csv_file: str,
+                 video_dir: str,
+                 num_frames: int = 64,
+                 resolution: int = 640,
+                 mode: str = 'train',
+                 video_processor: Optional[AutoVideoProcessor] = None):
+        self.df = pd.read_csv(csv_file)
+        self.video_dir = Path(video_dir)
+        self.num_frames = num_frames
+        self.resolution = resolution
+        self.mode = mode
+        self.video_processor = video_processor
+        
+        # Video transforms
+        self.transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((resolution, resolution)),
+            transforms.ToTensor(),
+        ])
+        
+        # Check if we have ground truth labels
+        self.has_labels = all(col in self.df.columns for col in self.MOS_COLS)
+```
+</Accordion>
+
+**Features**:
+- Supports both manual transforms (DOVER++) and video processor (V-JEPA2)
+- Automatic label detection
+- Flexible resolution
+- Mode-aware (train/val/test)
+
+### GPU-Optimized Collation
+
+From `dataset.py:193-288`:
+
+<Tabs>
+  <Tab title="OptimizedGPUCollate">
+    ```python
+    class OptimizedGPUCollate:
+        def __init__(self, 
+                     video_processor: Optional[AutoVideoProcessor] = None,
+                     text_encoder: Optional[SentenceTransformer] = None,
+                     device: str = 'cuda',
+                     max_frames: int = 64):
+            self.video_processor = video_processor
+            self.text_encoder = text_encoder
+            self.device = device
+            self.max_frames = max_frames
+    ```
+    
+    **Purpose**: Custom collation function that:
+    - Batches video frames
+    - Encodes text prompts on GPU
+    - Moves data to GPU early
+    - Cleans up memory
+  </Tab>
+  
+  <Tab title="Batching Process">
+    From `dataset.py:226-288`:
+    ```python
+    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        # Extract components
+        frames_list = [item["frames"] for item in batch]
+        prompts = [item["prompt"] for item in batch]
+        labels_list = [item["labels"] for item in batch]
+        
+        # Stack frames
+        frames = torch.stack(frames_list, dim=0)
+        pixel_values_videos = frames.to(self.device)
+        
+        # Encode text on GPU
+        text_emb = self.text_encoder.encode(
+            prompts,
+            convert_to_tensor=True,
+            normalize_embeddings=True,
+            device=self.device,
+        )
+        
+        # Clean up
+        del frames_list
+        torch.cuda.empty_cache()
+        
+        return {
+            "pixel_values_videos": pixel_values_videos,
+            "text_emb": text_emb,
+            "labels": labels,
+            "video_names": video_names,
+            "prompts": prompts
+        }
+    ```
+  </Tab>
+  
+  <Tab title="Memory Optimization">
+    **Key Optimizations**:
+    
+    1. **Early GPU transfer**: Move data to GPU in collate (before training loop)
+    2. **Batch text encoding**: Encode all prompts at once
+    3. **Memory cleanup**: Delete intermediate variables + empty cache
+    4. **No-grad text**: Text encoding doesn't need gradients
+    
+    ```python
+    # Clean up memory
+    del frames_list
+    torch.cuda.empty_cache()
+    ```
+    
+    <Info>
+    This collation strategy reduces CPU-GPU transfer overhead by ~30% compared to naive batching.
+    </Info>
+  </Tab>
+</Tabs>
+
+## DataLoader Configuration
+
+From `dataset.py:291-375`:
+
+<Tabs>
+  <Tab title="Training Loader">
+    ```python
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=4,              # DOVER++: 4, V-JEPA2: 6
+        shuffle=True,              # Shuffle for training
+        collate_fn=collate_fn,     # Custom GPU collation
+        num_workers=4,             # Parallel data loading
+        pin_memory=True,           # Faster CPU→GPU transfer
+        persistent_workers=True    # Keep workers alive
+    )
+    ```
+    
+    From `config.py:31,47`:
+    ```python
+    DOVER_CONFIG = {"batch_size": 4}
+    VJEPA_CONFIG = {"batch_size": 6}
+    ```
+  </Tab>
+  
+  <Tab title="Validation Loader">
+    ```python
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=4,
+        shuffle=False,             # No shuffle for validation
+        collate_fn=collate_fn,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True
+    )
+    ```
+    
+    **Difference from training**:
+    - `shuffle=False`: Consistent evaluation order
+    - Same batch size for fair comparison
+  </Tab>
+  
+  <Tab title="Test Loader">
+    From `dataset.py:378-433`:
+    ```python
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=1,              # Process one at a time
+        shuffle=False,             # Preserve order
+        collate_fn=collate_fn,
+        num_workers=0,             # Single worker for stability
+        pin_memory=True
+    )
+    ```
+    
+    **Test-specific settings**:
+    - `batch_size=1`: Avoid OOM on diverse test videos
+    - `num_workers=0`: Simpler debugging
+    - `shuffle=False`: Match predictions to input order
+  </Tab>
+  
+  <Tab title="Worker Configuration">
+    From `config.py:73-75`:
+    ```python
+    TRAINING_CONFIG = {
+        "num_workers": 4,
+        "pin_memory": True,
+        "persistent_workers": True
+    }
+    ```
+    
+    **Settings Explained**:
+    
+    | Setting | Value | Purpose |
+    |---------|-------|----------|
+    | `num_workers` | 4 | Parallel video loading (CPU cores) |
+    | `pin_memory` | True | Faster CPU→GPU transfer (page-locked memory) |
+    | `persistent_workers` | True | Workers stay alive between epochs (faster) |
+    
+    <Warning>
+    **num_workers > 0** requires proper multiprocessing. On some systems (especially with Decord), use `num_workers=0` if you encounter issues.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Complete Data Flow
+
+<Steps>
+  <Step title="CSV Loading">
+    ```python
+    df = pd.read_csv(csv_file)
+    # Columns: video_name, Prompt, Traditional_MOS, ..., Overall_MOS
+    ```
+  </Step>
+  
+  <Step title="Video Reading">
+    ```python
+    vr = VideoReader(str(video_path))
+    frames = vr.get_batch(indices)  # (64, H, W, 3)
+    ```
+  </Step>
+  
+  <Step title="Frame Transformation">
+    ```python
+    for frame in frames:
+        transformed = transform(frame)  # Resize + ToTensor
+    video_tensor = stack(transformed)  # (3, 64, H, W)
+    ```
+  </Step>
+  
+  <Step title="Batching">
+    ```python
+    batch_frames = stack([item['frames'] for item in batch])  # (B, 3, 64, H, W)
+    batch_frames = batch_frames.to('cuda')
+    ```
+  </Step>
+  
+  <Step title="Text Encoding">
+    ```python
+    text_emb = text_encoder.encode(prompts, device='cuda')  # (B, 1024)
+    ```
+  </Step>
+  
+  <Step title="Label Extraction">
+    ```python
+    labels = torch.tensor(mos_scores, dtype=float32)  # (B, 5)
+    ```
+  </Step>
+  
+  <Step title="Return Batch">
+    ```python
+    return {
+        "pixel_values_videos": batch_frames,
+        "text_emb": text_emb,
+        "labels": labels,
+        "prompts": prompts,
+        "video_names": video_names
+    }
+    ```
+  </Step>
+</Steps>
+
+## Performance Considerations
+
+<Tabs>
+  <Tab title="Bottlenecks">
+    **Common bottlenecks in video data loading**:
+    
+    1. **Disk I/O**: Reading video files from disk
+       - **Solution**: Use SSD storage, prefetch with num_workers
+    
+    2. **Video decoding**: Decompressing video codecs
+       - **Solution**: Decord with GPU acceleration
+    
+    3. **Frame transformation**: Resizing and converting
+       - **Solution**: Batch transforms, use GPU if possible
+    
+    4. **Text encoding**: BERT forward pass
+       - **Solution**: Encode in collate_fn (parallel with training)
+    
+    5. **CPU→GPU transfer**: Moving data to GPU
+       - **Solution**: pin_memory=True, early GPU transfer
+  </Tab>
+  
+  <Tab title="Optimization Tips">
+    <Info>
+    **Data Loading Best Practices**:
+    
+    ✅ **DO**:
+    - Use SSD for video storage
+    - Set `num_workers=4` (match CPU cores)
+    - Enable `pin_memory=True`
+    - Use `persistent_workers=True`
+    - Encode text on GPU in collate_fn
+    - Clean up memory after batching
+    
+    ❌ **DON'T**:
+    - Load full videos into memory
+    - Encode text on CPU then transfer
+    - Use `num_workers` > CPU cores
+    - Forget to call `empty_cache()`
+    - Decode videos to RGB unnecessarily
+    </Info>
+  </Tab>
+  
+  <Tab title="Profiling">
+    **Measure data loading speed**:
+    
+    ```python
+    import time
+    
+    start = time.time()
+    for batch in train_loader:
+        # Measure time to get batch
+        print(f"Batch loaded in {time.time() - start:.2f}s")
+        start = time.time()
+        break
+    ```
+    
+    **Target**: Less than 0.5s per batch (should be faster than model forward pass)
+  </Tab>
+</Tabs>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    How preprocessed data flows through models
+  </Card>
+  
+  <Card title="DOVER++ Model" icon="brain" href="/concepts/dover-model">
+    640×640 resolution requirements
+  </Card>
+  
+  <Card title="V-JEPA2 Model" icon="microchip" href="/concepts/vjepa-model">
+    384×384 resolution and video processor
+  </Card>
+</CardGroup>

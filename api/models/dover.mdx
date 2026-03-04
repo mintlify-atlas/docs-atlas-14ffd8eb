@@ -1,0 +1,390 @@
+---
+title: "DOVER++"
+description: "DOVER++ (Disentangled Objective Video Quality Evaluator) model implementation for video quality assessment"
+---
+
+## Overview
+
+DOVER++ is a state-of-the-art video quality assessment model that combines a ConvNeXt 3D backbone with quality-aware fusion for multi-modal assessment. The implementation includes separate heads for aesthetic and technical quality, with cross-modal attention for combining video and text features.
+
+## DOVERModel
+
+The main DOVER++ model class that integrates video encoding, text understanding, quality-aware fusion, and MOS prediction.
+
+### Constructor
+
+```python
+DOVERModel(
+    dover_weights_path: str = "models/DOVER_plus_plus.pth",
+    text_encoder_name: str = "BAAI/bge-large-en-v1.5",
+    device: str = 'cuda'
+)
+```
+
+<ParamField path="dover_weights_path" type="str" default="models/DOVER_plus_plus.pth">
+  Path to DOVER++ pretrained weights file. If the file doesn't exist, it will be automatically downloaded from HuggingFace.
+</ParamField>
+
+<ParamField path="text_encoder_name" type="str" default="BAAI/bge-large-en-v1.5">
+  HuggingFace model ID for the text encoder. Uses BGE-Large by default, with fallback to all-MiniLM-L6-v2 if loading fails.
+</ParamField>
+
+<ParamField path="device" type="str" default="cuda">
+  Device to place the model on ('cuda' or 'cpu').
+</ParamField>
+
+### Methods
+
+#### forward
+
+Forward pass through the complete model with video frames and text prompts.
+
+```python
+forward(
+    frames: torch.Tensor,
+    prompts: List[str]
+) -> torch.Tensor
+```
+
+<ParamField path="frames" type="torch.Tensor" required>
+  Video frames tensor with shape (B, C, T, H, W) where:
+  - B = batch size
+  - C = channels (3 for RGB)
+  - T = number of frames
+  - H = height
+  - W = width
+</ParamField>
+
+<ParamField path="prompts" type="List[str]" required>
+  List of text prompts corresponding to each video in the batch.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  MOS predictions with shape (B, 5) containing [Traditional, Alignment, Aesthetic, Temporal, Overall] quality scores.
+</ResponseField>
+
+#### get_quality_weights
+
+Extract quality aspect weights for given text prompts.
+
+```python
+get_quality_weights(
+    prompts: List[str]
+) -> torch.Tensor
+```
+
+<ParamField path="prompts" type="List[str]" required>
+  List of text prompts to analyze for quality aspects.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Quality weights tensor with shape (B, 4) representing [Traditional, Alignment, Aesthetic, Temporal] aspect weights.
+</ResponseField>
+
+#### extract_features
+
+Extract intermediate features from video and text without MOS prediction.
+
+```python
+extract_features(
+    frames: torch.Tensor,
+    prompts: List[str]
+) -> Dict[str, torch.Tensor]
+```
+
+<ParamField path="frames" type="torch.Tensor" required>
+  Video frames tensor with shape (B, C, T, H, W).
+</ParamField>
+
+<ParamField path="prompts" type="List[str]" required>
+  List of text prompts corresponding to each video.
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, torch.Tensor]">
+  Dictionary containing:
+  - `dover_features`: DOVER feature vectors (B, 1024)
+  - `text_features`: Text embeddings (B, text_dim)
+  - `fused_features`: Quality-aware fused features (B, 256)
+  - `quality_weights`: Quality aspect weights (B, 4)
+  - `aesthetic_score`: Aesthetic quality scores (B, 1)
+  - `technical_score`: Technical quality scores (B, 1)
+</ResponseField>
+
+### Usage Example
+
+```python
+import torch
+from src.models.dover_model import DOVERModel
+
+# Initialize model
+model = DOVERModel(
+    dover_weights_path="models/DOVER_plus_plus.pth",
+    text_encoder_name="BAAI/bge-large-en-v1.5",
+    device='cuda'
+)
+model.eval()
+
+# Prepare video frames (B=2, C=3, T=16, H=224, W=224)
+frames = torch.randn(2, 3, 16, 224, 224).cuda()
+
+# Text prompts
+prompts = [
+    "A person walking in a park",
+    "Ocean waves crashing on the shore"
+]
+
+# Get MOS predictions
+with torch.no_grad():
+    mos_scores = model(frames, prompts)
+    print(f"MOS scores: {mos_scores}")  # Shape: (2, 5)
+    
+# Extract quality weights
+quality_weights = model.get_quality_weights(prompts)
+print(f"Quality weights: {quality_weights}")  # Shape: (2, 4)
+
+# Extract features
+features = model.extract_features(frames, prompts)
+print(f"DOVER features shape: {features['dover_features'].shape}")
+print(f"Fused features shape: {features['fused_features'].shape}")
+```
+
+---
+
+## DOVERModelSimple
+
+Simplified DOVER++ model with ConvNeXt 3D backbone, compatible with pretrained weights.
+
+### Constructor
+
+```python
+DOVERModelSimple(
+    device: str = 'cuda'
+)
+```
+
+<ParamField path="device" type="str" default="cuda">
+  Device to place the model on ('cuda' or 'cpu').
+</ParamField>
+
+### Methods
+
+#### forward
+
+Forward pass through DOVER backbone and quality heads.
+
+```python
+forward(
+    x: torch.Tensor
+) -> Dict[str, torch.Tensor]
+```
+
+<ParamField path="x" type="torch.Tensor" required>
+  Video tensor with shape (B, C, T, H, W).
+</ParamField>
+
+<ResponseField name="return" type="Dict[str, torch.Tensor]">
+  Dictionary containing:
+  - `features`: Feature vectors for fusion (B, 1024)
+  - `aesthetic_score`: Aesthetic quality scores (B, 1)
+  - `technical_score`: Technical quality scores (B, 1)
+  - `backbone_features`: Raw backbone features (B, 768, T', H', W')
+</ResponseField>
+
+### Usage Example
+
+```python
+import torch
+from src.models.dover_model import DOVERModelSimple, DOVERModelLoader
+
+# Load pretrained model
+model = DOVERModelLoader.load_dover_model(
+    weights_path="models/DOVER_plus_plus.pth",
+    device='cuda'
+)
+model.eval()
+
+# Process video
+frames = torch.randn(1, 3, 16, 224, 224).cuda()
+
+with torch.no_grad():
+    output = model(frames)
+    print(f"Aesthetic score: {output['aesthetic_score'].item():.3f}")
+    print(f"Technical score: {output['technical_score'].item():.3f}")
+    print(f"Features shape: {output['features'].shape}")
+```
+
+---
+
+## QualityAwareFusion
+
+Quality-aware fusion module for combining DOVER++ and text features using cross-modal attention.
+
+### Constructor
+
+```python
+QualityAwareFusion(
+    dover_dim: int = 1024,
+    text_dim: int = 1024,
+    hidden_dim: int = 512
+)
+```
+
+<ParamField path="dover_dim" type="int" default="1024">
+  Dimension of DOVER feature vectors.
+</ParamField>
+
+<ParamField path="text_dim" type="int" default="1024">
+  Dimension of text feature vectors.
+</ParamField>
+
+<ParamField path="hidden_dim" type="int" default="512">
+  Hidden dimension for cross-modal attention and fusion layers.
+</ParamField>
+
+### Methods
+
+#### forward
+
+Fuse DOVER++ and text features with quality-aware attention.
+
+```python
+forward(
+    dover_features: torch.Tensor,
+    text_features: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]
+```
+
+<ParamField path="dover_features" type="torch.Tensor" required>
+  DOVER features with shape (B, dover_dim).
+</ParamField>
+
+<ParamField path="text_features" type="torch.Tensor" required>
+  Text features with shape (B, text_dim).
+</ParamField>
+
+<ResponseField name="return" type="Tuple[torch.Tensor, torch.Tensor]">
+  Tuple of (fused_features, quality_weights) where:
+  - fused_features: Shape (B, hidden_dim // 2)
+  - quality_weights: Shape (B, 4) - weights for 4 quality aspects
+</ResponseField>
+
+### Usage Example
+
+```python
+import torch
+from src.models.dover_model import QualityAwareFusion
+
+# Initialize fusion module
+fusion = QualityAwareFusion(
+    dover_dim=1024,
+    text_dim=1024,
+    hidden_dim=512
+).cuda()
+
+# Create sample features
+dover_features = torch.randn(4, 1024).cuda()
+text_features = torch.randn(4, 1024).cuda()
+
+# Fuse features
+fused, weights = fusion(dover_features, text_features)
+print(f"Fused features shape: {fused.shape}")  # (4, 256)
+print(f"Quality weights: {weights}")  # (4, 4)
+```
+
+---
+
+## MOSPredictor
+
+MOS prediction head that predicts 4 quality aspect scores plus an overall quality score.
+
+### Constructor
+
+```python
+MOSPredictor(
+    input_dim: int,
+    hidden_dim: int = 256
+)
+```
+
+<ParamField path="input_dim" type="int" required>
+  Input feature dimension.
+</ParamField>
+
+<ParamField path="hidden_dim" type="int" default="256">
+  Hidden layer dimension.
+</ParamField>
+
+### Methods
+
+#### forward
+
+Predict MOS scores from fused features.
+
+```python
+forward(
+    features: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="features" type="torch.Tensor" required>
+  Input features with shape (B, input_dim).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  MOS predictions with shape (B, 5) containing [Traditional, Alignment, Aesthetic, Temporal, Overall] scores.
+</ResponseField>
+
+### Usage Example
+
+```python
+import torch
+from src.models.dover_model import MOSPredictor
+
+# Initialize predictor
+predictor = MOSPredictor(
+    input_dim=256,
+    hidden_dim=256
+).cuda()
+
+# Predict MOS scores
+features = torch.randn(4, 256).cuda()
+mos_scores = predictor(features)
+print(f"MOS scores shape: {mos_scores.shape}")  # (4, 5)
+print(f"Traditional: {mos_scores[:, 0]}")
+print(f"Alignment: {mos_scores[:, 1]}")
+print(f"Aesthetic: {mos_scores[:, 2]}")
+print(f"Temporal: {mos_scores[:, 3]}")
+print(f"Overall: {mos_scores[:, 4]}")
+```
+
+---
+
+## Architecture Details
+
+### ConvNeXt 3D Backbone
+
+The DOVER++ model uses a ConvNeXt 3D backbone with the following architecture:
+
+- **Stem**: Conv3d(3→96, kernel=1×4×4, stride=1×4×4)
+- **Stage 1**: 3 ConvNeXt blocks (96 channels) → Downsample to 192
+- **Stage 2**: 3 ConvNeXt blocks (192 channels) → Downsample to 384
+- **Stage 3**: 9 ConvNeXt blocks (384 channels) → Downsample to 768
+- **Stage 4**: 3 ConvNeXt blocks (768 channels)
+
+### Quality Aspects
+
+The model predicts scores for 4 quality aspects plus overall quality:
+
+1. **Traditional Quality**: Standard video quality metrics (blur, noise, compression artifacts)
+2. **Alignment**: Semantic alignment between video content and text prompt
+3. **Aesthetic Quality**: Visual appeal and artistic quality
+4. **Temporal Consistency**: Smoothness and coherence across frames
+5. **Overall Quality**: Weighted combination of all aspects
+
+### Quality-Aware Fusion
+
+The fusion module uses:
+- **Quality Classifier**: Analyzes text to determine focus areas (4 quality aspects)
+- **Cross-Modal Attention**: 8-head attention for video-text alignment
+- **Feature Projection**: Projects features to common hidden dimension
+- **Fusion Layers**: LayerNorm + MLP for final feature combination

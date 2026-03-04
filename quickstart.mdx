@@ -1,80 +1,357 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quickstart Guide'
+description: 'Get started with QualiVision in under 5 minutes - evaluate AI-generated video quality using pre-trained models'
 ---
 
-## Get started in three steps
+## Get Started in 5 Minutes
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will help you run your first video quality assessment using QualiVision's pre-trained models.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **Prerequisites**: Make sure you have Python 3.8+ and CUDA installed (optional but recommended for GPU acceleration).
 </Note>
+
+## Setup
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/RITIK-12/QualiVision.git
+    cd QualiVision
+    ```
+  </Step>
+  
+  <Step title="Install Dependencies">
+    Install all required packages using pip:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    This will install PyTorch, transformers, and other necessary libraries. See the [installation guide](/installation) for detailed setup options.
+  </Step>
+  
+  <Step title="Prepare Your Data">
+    Organize your test videos in the following structure:
+    
+    ```
+    data/
+    └── test/
+        ├── test_labels.csv
+        └── videos/
+            ├── video001.mp4
+            ├── video002.mp4
+            └── ...
+    ```
+    
+    Your `test_labels.csv` should include:
+    ```csv
+    video_name,Prompt,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+    video001.mp4,"A cat playing piano",3.2,4.1,3.8,3.5,3.65
+    ```
+  </Step>
+</Steps>
+
+## Run Your First Evaluation
+
+<Tabs>
+  <Tab title="DOVER++ Model">
+    Evaluate videos using the DOVER++ model with ConvNeXt 3D architecture:
+    
+    ```bash
+    python scripts/evaluate.py \
+      --model dover \
+      --checkpoint models/dover_best.pt \
+      --data path/to/test/data
+    ```
+    
+    <Note>
+      Model weights will be automatically downloaded on first use if not present locally.
+    </Note>
+  </Tab>
+  
+  <Tab title="V-JEPA2 Model">
+    Evaluate videos using the V-JEPA2 model with Vision Transformer architecture:
+    
+    ```bash
+    python scripts/evaluate.py \
+      --model vjepa \
+      --checkpoint models/vjepa_best.pt \
+      --data path/to/test/data
+    ```
+    
+    <Note>
+      V-JEPA2 requires more memory (~16GB) but provides strong video representation learning.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Understanding the Output
+
+After evaluation completes, QualiVision generates comprehensive results:
+
+<Steps>
+  <Step title="Predictions CSV">
+    Contains quality scores for each video across all dimensions:
+    
+    ```csv
+    video_name,Traditional_MOS,Alignment_MOS,Aesthetic_MOS,Temporal_MOS,Overall_MOS
+    video001.mp4,3.15,4.08,3.82,3.47,3.63
+    video002.mp4,4.52,4.19,4.76,4.13,4.40
+    ```
+  </Step>
+  
+  <Step title="Metrics Report">
+    If ground truth labels are provided, you'll see performance metrics:
+    
+    ```
+    Evaluation Results:
+    ------------------
+      SROCC: 0.8542
+      PLCC: 0.8731
+      VQualA Score: 0.8637
+    ```
+  </Step>
+  
+  <Step title="Summary Report">
+    A detailed text report with model configuration and prediction statistics:
+    
+    ```
+    QualiVision Model Evaluation Report
+    ===================================
+    Model: DOVER
+    Checkpoint: models/dover_best.pt
+    Samples: 150
+    
+    Prediction Statistics:
+    ---------------------
+      Min: 2.1234
+      Max: 4.8765
+      Mean: 3.6542
+      Std: 0.7234
+    ```
+  </Step>
+</Steps>
+
+## Example: Complete Evaluation Workflow
+
+Here's a complete example showing how to evaluate a test dataset:
+
+```bash
+# Evaluate DOVER++ model with custom output directory
+python scripts/evaluate.py \
+  --model dover \
+  --checkpoint models/dover_best.pt \
+  --data data/test \
+  --output results/dover \
+  --batch-size 4
+```
+
+<Accordion title="Full Output Example">
+```
+QualiVision Model Evaluation
+============================
+Model: DOVER
+Checkpoint: models/dover_best.pt
+Test CSV: data/test/test_labels.csv
+Test videos: data/test/videos
+Output: results/dover
+Device: cuda
+
+Initializing DOVER Model Evaluator
+Checkpoint: models/dover_best.pt
+Device: cuda
+Loading DOVER checkpoint: models/dover_best.pt
+✓ DOVER checkpoint loaded
+✓ Model loaded successfully
+GPU Memory: 2.3 GB / 24.0 GB
+
+Evaluating on test dataset:
+  CSV: data/test/test_labels.csv
+  Videos: data/test/videos
+  Batch size: 4
+
+Generating predictions...
+Predicting: 100%|████████████████| 38/38 [02:15<00:00,  3.56s/it]
+✓ Generated predictions for 150 samples
+
+✓ Ground truth labels found, computing metrics
+
+Evaluation Results:
+------------------
+  SROCC: 0.8542
+  PLCC: 0.8731
+  RMSE: 0.3421
+  VQualA Score: 0.8637
+
+✓ Predictions saved:
+  CSV: results/dover/predictions_DOVER_20250304_143022.csv
+  Excel: results/dover/predictions_DOVER_20250304_143022.xlsx
+✓ Results saved: results/dover/results_DOVER_20250304_143022.json
+✓ Summary report saved: results/dover/report_DOVER_20250304_143022.txt
+
+✓ Evaluation completed successfully!
+Final VQualA Score: 0.8637
+```
+</Accordion>
+
+## Code Example: Using the Evaluator Class
+
+You can also use QualiVision programmatically in your Python code:
+
+```python
+import sys
+from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from src.models.dover_model import DOVERModel
+import torch
+
+# Initialize model
+model = DOVERModel(
+    dover_weights_path="models/DOVER_plus_plus.pth",
+    text_encoder_name="BAAI/bge-large-en-v1.5",
+    device="cuda"
+)
+
+# Load checkpoint
+checkpoint = torch.load("models/dover_best.pt")
+model.load_state_dict(checkpoint['model_state_dict'])
+model.eval()
+
+# Run inference
+with torch.no_grad():
+    outputs = model(video_tensor, text_prompts)
+    quality_scores = outputs.cpu().numpy()
+```
+
+<Accordion title="Full Evaluation Script from Source">
+Here's the core evaluation logic from `scripts/evaluate.py`:
+
+```python
+def _predict_on_loader(self, test_loader) -> Dict[str, Any]:
+    """Run predictions on data loader."""
+    predictions = []
+    targets = []
+    video_names = []
+    
+    print("\nGenerating predictions...")
+    
+    with torch.no_grad():
+        for i, batch in enumerate(tqdm(test_loader, desc="Predicting")):
+            try:
+                # Forward pass
+                if self.model_type == 'dover':
+                    outputs = self.model(batch['pixel_values_videos'], batch['prompts'])
+                else:  # vjepa
+                    outputs = self.model(batch['pixel_values_videos'], batch['text_emb'])
+                
+                # Extract predictions
+                batch_predictions = outputs.cpu().numpy()
+                batch_targets = batch['labels'].cpu().numpy()
+                
+                predictions.append(batch_predictions)
+                targets.append(batch_targets)
+                video_names.extend(batch['video_names'])
+                
+                # Memory cleanup
+                del outputs
+                if i % 10 == 0:
+                    ultra_memory_cleanup()
+            
+            except Exception as e:
+                print(f"⚠ Error processing batch {i}: {e}")
+    
+    # Concatenate all predictions
+    predictions = np.concatenate(predictions, axis=0)
+    targets = np.concatenate(targets, axis=0)
+    
+    return {
+        'predictions': predictions,
+        'targets': targets,
+        'video_names': video_names
+    }
+```
+
+From: `scripts/evaluate.py:188-239`
+</Accordion>
+
+## Advanced Options
+
+<AccordionGroup>
+  <Accordion title="Custom Batch Size">
+    Adjust batch size based on your GPU memory:
+    
+    ```bash
+    # Smaller batch for limited memory
+    python scripts/evaluate.py --model dover --checkpoint models/dover_best.pt \
+      --data data/test --batch-size 2
+    
+    # Larger batch for more memory
+    python scripts/evaluate.py --model dover --checkpoint models/dover_best.pt \
+      --data data/test --batch-size 8
+    ```
+  </Accordion>
+  
+  <Accordion title="CPU Evaluation">
+    If you don't have a GPU, you can run on CPU (slower):
+    
+    ```bash
+    python scripts/evaluate.py --model dover --checkpoint models/dover_best.pt \
+      --data data/test --device cpu
+    ```
+  </Accordion>
+  
+  <Accordion title="Custom CSV/Video Directory Names">
+    If your data uses different file names:
+    
+    ```bash
+    python scripts/evaluate.py --model dover --checkpoint models/dover_best.pt \
+      --data data/test \
+      --csv-name my_labels.csv \
+      --video-dir my_videos
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Train Custom Models"
+    icon="graduation-cap"
+    href="/guides/training"
+  >
+    Fine-tune QualiVision on your own dataset
+  </Card>
+  
+  <Card
+    title="Model Architecture"
+    icon="sitemap"
+    href="/concepts/architecture"
+  >
+    Deep dive into DOVER++ and V-JEPA2 architectures
+  </Card>
+  
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/models/dover"
+  >
+    Explore the complete API documentation
+  </Card>
+  
+  <Card
+    title="Memory Optimization"
+    icon="gauge"
+    href="/guides/memory-optimization"
+  >
+    Optimize memory usage for your hardware
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Memory Requirements**: DOVER++ requires ~12GB GPU memory, V-JEPA2 requires ~16GB. For limited memory, reduce batch size or use gradient accumulation.
+</Warning>

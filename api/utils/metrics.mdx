@@ -1,0 +1,236 @@
+---
+title: 'Metrics Utilities'
+description: 'Evaluation metrics for QualiVision video quality assessment'
+---
+
+## compute_metrics
+
+Compute comprehensive evaluation metrics for MOS prediction.
+
+```python
+from qualivision.utils.metrics import compute_metrics
+
+metrics = compute_metrics(
+    predictions=[3.5, 4.2, 2.8, 4.5],
+    targets=[3.7, 4.0, 2.9, 4.6],
+    metric_names=['spearman', 'pearson', 'vquala_score', 'mae', 'rmse']
+)
+```
+
+### Parameters
+
+<ParamField path="predictions" type="List[float]" required>
+  Predicted MOS scores
+</ParamField>
+
+<ParamField path="targets" type="List[float]" required>
+  Ground truth MOS scores
+</ParamField>
+
+<ParamField path="metric_names" type="List[str]" default="None">
+  List of metrics to compute. Default: ['spearman', 'pearson', 'vquala_score', 'mae', 'mse', 'rmse']
+  
+  Available metrics:
+  - 'spearman': Spearman rank correlation (SROCC)
+  - 'pearson': Pearson linear correlation (PLCC)
+  - 'vquala_score': VQualA challenge score (SROCC + PLCC) / 2
+  - 'mae': Mean absolute error
+  - 'mse': Mean squared error
+  - 'rmse': Root mean squared error
+  - 'std_pred': Standard deviation of predictions
+  - 'std_target': Standard deviation of targets
+  - 'mean_pred': Mean of predictions
+  - 'mean_target': Mean of targets
+</ParamField>
+
+### Returns
+
+<ResponseField name="metrics" type="Dict[str, float]">
+  Dictionary of computed metrics
+</ResponseField>
+
+### Example
+
+```python
+metrics = compute_metrics(predictions, targets)
+# Output:
+# {
+#   'spearman': 0.925,
+#   'pearson': 0.931,
+#   'vquala_score': 0.928,
+#   'mae': 0.153,
+#   'mse': 0.042,
+#   'rmse': 0.205
+# }
+```
+
+---
+
+## compute_vquala_score
+
+Compute VQualA challenge score: (SROCC + PLCC) / 2
+
+```python
+from qualivision.utils.metrics import compute_vquala_score
+
+score = compute_vquala_score(
+    predictions=[3.5, 4.2, 2.8, 4.5],
+    targets=[3.7, 4.0, 2.9, 4.6]
+)
+print(f"VQualA Score: {score:.4f}")
+```
+
+### Parameters
+
+<ParamField path="predictions" type="List[float]" required>
+  Predicted overall MOS scores
+</ParamField>
+
+<ParamField path="targets" type="List[float]" required>
+  Ground truth overall MOS scores
+</ParamField>
+
+### Returns
+
+<ResponseField name="score" type="float">
+  VQualA challenge score (average of SROCC and PLCC)
+</ResponseField>
+
+---
+
+## print_metrics
+
+Pretty print metrics dictionary.
+
+```python
+from qualivision.utils.metrics import print_metrics
+
+metrics = {
+    'spearman': 0.925,
+    'pearson': 0.931,
+    'vquala_score': 0.928,
+    'mae': 0.153
+}
+
+print_metrics(metrics, title="Validation Metrics")
+```
+
+### Parameters
+
+<ParamField path="metrics" type="Dict[str, float]" required>
+  Dictionary of metrics to print
+</ParamField>
+
+<ParamField path="title" type="str" default="'Metrics'">
+  Title for the metrics display
+</ParamField>
+
+### Example Output
+
+```
+Validation Metrics:
+===================
+    spearman: 0.9250
+     pearson: 0.9310
+vquala_score: 0.9280
+         mae: 0.1530
+```
+
+---
+
+## rank_corr
+
+Compute Spearman and Pearson correlation coefficients.
+
+```python
+from qualivision.utils.metrics import rank_corr
+
+srocc, plcc = rank_corr(
+    predictions=[3.5, 4.2, 2.8, 4.5],
+    targets=[3.7, 4.0, 2.9, 4.6]
+)
+print(f"SROCC: {srocc:.4f}, PLCC: {plcc:.4f}")
+```
+
+### Parameters
+
+<ParamField path="predictions" type="List[float]" required>
+  Predicted MOS scores
+</ParamField>
+
+<ParamField path="targets" type="List[float]" required>
+  Ground truth MOS scores
+</ParamField>
+
+### Returns
+
+<ResponseField name="spearman_corr" type="float">
+  Spearman rank correlation coefficient (SROCC)
+</ResponseField>
+
+<ResponseField name="pearson_corr" type="float">
+  Pearson linear correlation coefficient (PLCC)
+</ResponseField>
+
+---
+
+## evaluate_all_dimensions
+
+Evaluate all MOS dimensions separately.
+
+```python
+from qualivision.utils.metrics import evaluate_all_dimensions
+import numpy as np
+
+predictions = np.array([
+    [3.5, 4.0, 3.8, 4.2, 3.9],  # Sample 1: Traditional, Alignment, Aesthetic, Temporal, Overall
+    [2.8, 3.2, 3.0, 3.5, 3.1],  # Sample 2
+])
+
+targets = np.array([
+    [3.7, 4.1, 3.9, 4.0, 3.9],
+    [2.9, 3.0, 3.1, 3.4, 3.2],
+])
+
+results = evaluate_all_dimensions(predictions, targets)
+```
+
+### Parameters
+
+<ParamField path="predictions" type="np.ndarray" required>
+  Predicted MOS scores with shape (N, 5)
+</ParamField>
+
+<ParamField path="targets" type="np.ndarray" required>
+  Ground truth MOS scores with shape (N, 5)
+</ParamField>
+
+<ParamField path="dimension_names" type="List[str]" default="None">
+  Names for each dimension. Default: ['Traditional', 'Alignment', 'Aesthetic', 'Temporal', 'Overall']
+</ParamField>
+
+### Returns
+
+<ResponseField name="results" type="Dict[str, Dict[str, float]]">
+  Dictionary with metrics for each dimension. Each dimension contains:
+  - spearman: Spearman correlation
+  - pearson: Pearson correlation
+  - vquala_score: VQualA score
+  - mae: Mean absolute error
+  - rmse: Root mean squared error
+</ResponseField>
+
+### Example
+
+```python
+results = evaluate_all_dimensions(predictions, targets)
+for dim_name, dim_metrics in results.items():
+    print(f"{dim_name}: VQualA={dim_metrics['vquala_score']:.4f}, MAE={dim_metrics['mae']:.4f}")
+
+# Output:
+# Traditional: VQualA=0.9250, MAE=0.153
+# Alignment: VQualA=0.9180, MAE=0.162
+# Aesthetic: VQualA=0.9310, MAE=0.145
+# Temporal: VQualA=0.9420, MAE=0.138
+# Overall: VQualA=0.9380, MAE=0.141
+```
